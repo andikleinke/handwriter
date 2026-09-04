@@ -141,67 +141,7 @@ function sampleChain(chain, step, glyphs, upem) {
   // shade untouched (it takes a fifth of an em) and clips the jump.
   slewLimit(halfL, s, CROSS_SLEW);
   slewLimit(halfR, s, CROSS_SLEW);
-  return { pts, s: revisitArc(pts, s, tan, halfL, halfR, upem), R, n, item, halfL, halfR, tan };
-}
-
-/**
- * The arc length at which each sample's ink should appear, which is not the
- * sample's own once the pen goes back over its own line.
- *
- * A `d` runs up its stem and back down it; an `o` closes its bowl and retraces
- * the right side to reach the exit. The ink is written the first time; coming
- * back over it adds nothing. But the two passes lie a fraction of a pixel
- * apart, so each claims some of the ink and leaves the rest to the other, and
- * the reveal breaks into a comb of fragments - half of the stroke appearing
- * hundreds of units of arc after the half beside it.
- *
- * So a sample that returns to somewhere the pen has already been - within the
- * ink's own half-width, running along the same line rather than across it, and
- * a good way back along the path - inherits the arc length of that first
- * visit. The three conditions matter together: neighbouring samples are always
- * close and parallel, so without the arc gap the earliest time would run away
- * along the whole stroke; and where two strokes genuinely cross they run
- * transverse to each other and keep their own times.
- */
-function revisitArc(pts, s, tan, halfL, halfR, upem) {
-  const n = pts.length;
-  const out = Float32Array.from(s);
-  // a grid at the scale of the widest cross-section, so a lookup stays local
-  let cell = 0;
-  for (let k = 0; k < n; k++) cell = Math.max(cell, halfL[k], halfR[k]);
-  cell = Math.max(cell, 1e-6);
-  const grid = new Map();
-  for (let k = 0; k < n; k++) {
-    const [x, y] = pts[k];
-    const tol = Math.max(halfL[k], halfR[k]) * 0.8;
-    // far enough back that the pen has been somewhere else in between
-    const minGap = Math.max(4 * tol, 0.12 * upem);
-    const tx = tan[2 * k], ty = tan[2 * k + 1];
-    let best = out[k];
-    const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
-    for (let gx = cx - 1; gx <= cx + 1; gx++) {
-      for (let gy = cy - 1; gy <= cy + 1; gy++) {
-        const bucket = grid.get(`${gx},${gy}`);
-        if (!bucket) continue;
-        for (const j of bucket) {
-          if (s[k] - s[j] < minGap) continue;
-          const dx = pts[j][0] - x, dy = pts[j][1] - y;
-          if (dx * dx + dy * dy > tol * tol) continue;
-          // along the same line, forwards or back - not across it
-          if (Math.abs(tan[2 * j] * tx + tan[2 * j + 1] * ty) < 0.7) continue;
-          // the first visit's own time, never one it inherited: an arc that
-          // walked back through a chain of revisits would drag the whole
-          // stroke to the moment the pen first touched the page
-          if (s[j] < best) best = s[j];
-        }
-      }
-    }
-    out[k] = best;
-    const kk = `${cx},${cy}`;
-    const bucket = grid.get(kk);
-    if (bucket) bucket.push(k); else grid.set(kk, [k]);
-  }
-  return out;
+  return { pts, s, R, n, item, halfL, halfR, tan };
 }
 
 /**
@@ -375,6 +315,15 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
    * sample's - a band is a rectangle, and giving the whole of it one arc made
    * the reveal front a staircase of square steps instead of a line drawn
    * across the stroke. It shows wherever the band is wide.
+   *
+   * The fill travels through any ink within reach but claims only what falls
+   * inside the band. Letting it walk only where it may claim looks equivalent
+   * and is not: the band is a straight rectangle laid on a curving stroke, so
+   * ink at the outer edge of a bend is often reachable only by stepping
+   * outside the rectangle and back in. Every band skipped those pixels, and
+   * the next pass over that ink - the retrace of an `o`'s right side, hundreds
+   * of units of arc later - collected them, which is what broke the stroke
+   * into a comb of fragments as it was revealed.
    */
   const band = (x, y, tx, ty, hl, hr, along, mode, ci, sk, plane) => {
     const reach = Math.max(hl, hr, along) + 2;
@@ -391,7 +340,12 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
       const px = i % w, py = (i - px) / w;
       const beyond = !plane || (px - plane.x) * plane.dx + (py - plane.y) * plane.dy >= 0;
       const alongHere = (px - x) * tx + (py - y) * ty;
-      if (mode === 'hide') {
+      const acrossI = (px - x) * -ty + (py - y) * tx;
+      // inside the band itself? (the fill travels wider than it claims)
+      const inBand = Math.abs(alongHere) <= along
+        && acrossI <= hl + NIB_SLACK_PX && -acrossI <= hr + NIB_SLACK_PX;
+      if (!inBand) { /* travelled through, not claimed */ }
+      else if (mode === 'hide') {
         if (beyond && (c === -1 || c === ci)) chain[i] = HIDDEN;
       } else if (beyond && (c === -1 || (c === HIDDEN && mode === 'stroke'))) {
         chain[i] = ci;
@@ -409,17 +363,13 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
           const j = ny * w + nx;
           if (stamp[j] === serial || !dom[j]) continue;
           const ex = nx - x, ey = ny - y;
-          const alongE = ex * tx + ey * ty;
+          if (ex * ex + ey * ey > reach * reach) continue; // out of the band's neighbourhood
           const across = ex * -ty + ey * tx;
-          if (Math.abs(alongE) > along) continue;
-          if (across > hl + NIB_SLACK_PX || -across > hr + NIB_SLACK_PX) continue;
-          // The valley again, but during the fill rather than along one ray:
-          // the band grows sideways through the ink, so it can round a corner
-          // the perpendicular never crossed. Moving away from the path, the
-          // distance to the outline falls while we are still in this stroke
-          // and climbs once we start up the flank of one crossing it - so a
-          // step that goes both outward and uphill leaves this stroke, and
-          // the ink beyond belongs to whichever pass owns that core.
+          // The valley: moving away from the path, the distance to the outline
+          // falls while we are still in this stroke and climbs once we start up
+          // the flank of one crossing it - so a step that goes both outward and
+          // uphill leaves this stroke, and the ink beyond belongs to whichever
+          // pass owns that core. Travel stops there; it is not just unclaimed.
           if (Math.abs(across) > acrossHere && dist[j] > dist[i] + 0.5) continue;
           stamp[j] = serial;
           queue[tail++] = j;

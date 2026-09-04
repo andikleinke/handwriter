@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.17.1",
+    "tag": "v0.17.1",
+    "date": "2026-09-04",
+    "note": "v0.17.1 — revert the retrace rule that drew an o's swirl early; let a band travel through ink it may not claim"
+  },
+  {
     "version": "0.17.0",
     "tag": "v0.17.0",
     "date": "2026-09-04",

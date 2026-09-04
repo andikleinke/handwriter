@@ -678,22 +678,6 @@ glyph instead, and `src/render/animator.js` plays it:
   it missed went to whichever pass was nearest - at a crossing, the one still
   to come. That is what broke pieces out of a shade as it was written and
   filled them in when the crossing arrived.
-- **Going back over a line reveals nothing (v0.17.0).** A `d` runs up its stem
-  and back down it; an `o` closes its bowl and retraces the right side to
-  reach the exit. The ink was written the first time, and the return adds
-  nothing - but the two passes lie a fraction of a pixel apart, so each
-  claimed some of the ink and left the rest to the other. Reading the map
-  across the `o`'s right side, one row alternated between arc 1650 and arc
-  2100: half the stroke appearing hundreds of units of arc after the half
-  beside it, which on screen is a comb of chopped-off fragments along the
-  edge. A sample that returns to somewhere the pen has already been now
-  inherits the arc length of that first visit. Three conditions together:
-  within the ink's own half-width, running along the same line rather than
-  across it, and far enough back along the path that the pen has been
-  somewhere else in between - neighbouring samples are always close and
-  parallel, so without the last one the earliest time runs away along the
-  whole stroke, and two strokes that genuinely cross run transverse to each
-  other and keep their own times.
 - **First pass wins, per pixel.** The passes are replayed in pen order. Every
   pixel the disk touches for the first time is claimed by that chain at that
   arc length - so a pixel's reveal time is the moment the nib first covers
@@ -1008,11 +992,31 @@ script and is never edited by hand.
   of the ±0.08 em window. Where two strokes run nearly parallel through each
   other - a very shallow crossing - the nib can still follow the union and
   sweep a little of the stroke still to come.
-- The reveal front is smooth where a stroke is drawn once and where it is
-  retraced, but at a genuine crossing the seam between the two passes is a
-  real discontinuity in time and shows as a hard edge. That is correct - the
-  ink either side really was written at different moments - but it is the
-  remaining place where the front is not a smooth curve.
+- **Where a stroke runs alongside its own later pass the seam is ragged.**
+  The right side of an `o` is written twice: the bowl closes over it, and the
+  exit swirl retraces it about 1200 units of arc later. Both passes have a
+  claim on the overlap - the earlier takes what its own cross-section covers,
+  the later takes the rest, which is right - but the boundary is decided pixel
+  by pixel from a cross-section measured sample by sample, so it comes out
+  ragged, and a ragged boundary between two moments that far apart reads as
+  chunks chopped out of the stroke.
+
+  Measured as neighbouring ink of one pass revealed more than 0.1 em of arc
+  apart, it is about 230 pixels of the `o`'s 11500. Tried and rejected for it
+  (v0.17.0, reverted in v0.17.1): giving a retrace the arc of the pass it goes
+  back over - it settles the seam, but the later pass's *own* new ink then
+  appears early, so the `o`'s swirl draws itself on the upstroke. Also tried:
+  a 3x3 and a 5x5 median over the arc field (the 5x5 more than tripled the
+  jumps, smearing values into new discontinuities); raising the cross-section
+  cap; disabling either valley rule; disabling the wedge pass - the last four
+  leave the region pixel for pixel unchanged.
+
+  The remaining fix is structural rather than another rule: segment the ink
+  into a region per pass with a proper boundary - a medial-axis decomposition
+  with junction typing, StrokeStyles-style - instead of deciding ownership
+  pixel by pixel from whichever band reaches first. That is the step deferred
+  under "Could a pen just draw it, instead?", and this is the case showing the
+  heuristics cannot close it.
 - Pointed pen (v0.14.0): the z and the x are written in three strokes with
   the crossing hairlines of the x drawn downward (Vitolo's way); the a's and g's oval rides up under the stem for a
   third of an x-height before the stem is pulled; the o leaves by running
