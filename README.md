@@ -678,6 +678,22 @@ glyph instead, and `src/render/animator.js` plays it:
   it missed went to whichever pass was nearest - at a crossing, the one still
   to come. That is what broke pieces out of a shade as it was written and
   filled them in when the crossing arrived.
+- **Going back over a line reveals nothing (v0.17.0).** A `d` runs up its stem
+  and back down it; an `o` closes its bowl and retraces the right side to
+  reach the exit. The ink was written the first time, and the return adds
+  nothing - but the two passes lie a fraction of a pixel apart, so each
+  claimed some of the ink and left the rest to the other. Reading the map
+  across the `o`'s right side, one row alternated between arc 1650 and arc
+  2100: half the stroke appearing hundreds of units of arc after the half
+  beside it, which on screen is a comb of chopped-off fragments along the
+  edge. A sample that returns to somewhere the pen has already been now
+  inherits the arc length of that first visit. Three conditions together:
+  within the ink's own half-width, running along the same line rather than
+  across it, and far enough back along the path that the pen has been
+  somewhere else in between - neighbouring samples are always close and
+  parallel, so without the last one the earliest time runs away along the
+  whole stroke, and two strokes that genuinely cross run transverse to each
+  other and keep their own times.
 - **First pass wins, per pixel.** The passes are replayed in pen order. Every
   pixel the disk touches for the first time is claimed by that chain at that
   arc length - so a pixel's reveal time is the moment the nib first covers
@@ -992,6 +1008,11 @@ script and is never edited by hand.
   of the ±0.08 em window. Where two strokes run nearly parallel through each
   other - a very shallow crossing - the nib can still follow the union and
   sweep a little of the stroke still to come.
+- The reveal front is smooth where a stroke is drawn once and where it is
+  retraced, but at a genuine crossing the seam between the two passes is a
+  real discontinuity in time and shows as a hard edge. That is correct - the
+  ink either side really was written at different moments - but it is the
+  remaining place where the front is not a smooth curve.
 - Pointed pen (v0.14.0): the z and the x are written in three strokes with
   the crossing hairlines of the x drawn downward (Vitolo's way); the a's and g's oval rides up under the stem for a
   third of an x-height before the stem is pulled; the o leaves by running

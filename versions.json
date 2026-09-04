@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.17.0",
+    "tag": "v0.17.0",
+    "date": "2026-09-04",
+    "note": "v0.17.0 — retraced ink keeps its first-visit time, so a stroke no longer reveals as a comb"
+  },
+  {
     "version": "0.16.0",
     "tag": "v0.16.0",
     "date": "2026-09-04",

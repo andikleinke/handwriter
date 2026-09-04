@@ -141,7 +141,67 @@ function sampleChain(chain, step, glyphs, upem) {
   // shade untouched (it takes a fifth of an em) and clips the jump.
   slewLimit(halfL, s, CROSS_SLEW);
   slewLimit(halfR, s, CROSS_SLEW);
-  return { pts, s, R, n, item, halfL, halfR, tan };
+  return { pts, s: revisitArc(pts, s, tan, halfL, halfR, upem), R, n, item, halfL, halfR, tan };
+}
+
+/**
+ * The arc length at which each sample's ink should appear, which is not the
+ * sample's own once the pen goes back over its own line.
+ *
+ * A `d` runs up its stem and back down it; an `o` closes its bowl and retraces
+ * the right side to reach the exit. The ink is written the first time; coming
+ * back over it adds nothing. But the two passes lie a fraction of a pixel
+ * apart, so each claims some of the ink and leaves the rest to the other, and
+ * the reveal breaks into a comb of fragments - half of the stroke appearing
+ * hundreds of units of arc after the half beside it.
+ *
+ * So a sample that returns to somewhere the pen has already been - within the
+ * ink's own half-width, running along the same line rather than across it, and
+ * a good way back along the path - inherits the arc length of that first
+ * visit. The three conditions matter together: neighbouring samples are always
+ * close and parallel, so without the arc gap the earliest time would run away
+ * along the whole stroke; and where two strokes genuinely cross they run
+ * transverse to each other and keep their own times.
+ */
+function revisitArc(pts, s, tan, halfL, halfR, upem) {
+  const n = pts.length;
+  const out = Float32Array.from(s);
+  // a grid at the scale of the widest cross-section, so a lookup stays local
+  let cell = 0;
+  for (let k = 0; k < n; k++) cell = Math.max(cell, halfL[k], halfR[k]);
+  cell = Math.max(cell, 1e-6);
+  const grid = new Map();
+  for (let k = 0; k < n; k++) {
+    const [x, y] = pts[k];
+    const tol = Math.max(halfL[k], halfR[k]) * 0.8;
+    // far enough back that the pen has been somewhere else in between
+    const minGap = Math.max(4 * tol, 0.12 * upem);
+    const tx = tan[2 * k], ty = tan[2 * k + 1];
+    let best = out[k];
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+    for (let gx = cx - 1; gx <= cx + 1; gx++) {
+      for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const bucket = grid.get(`${gx},${gy}`);
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (s[k] - s[j] < minGap) continue;
+          const dx = pts[j][0] - x, dy = pts[j][1] - y;
+          if (dx * dx + dy * dy > tol * tol) continue;
+          // along the same line, forwards or back - not across it
+          if (Math.abs(tan[2 * j] * tx + tan[2 * j + 1] * ty) < 0.7) continue;
+          // the first visit's own time, never one it inherited: an arc that
+          // walked back through a chain of revisits would drag the whole
+          // stroke to the moment the pen first touched the page
+          if (s[j] < best) best = s[j];
+        }
+      }
+    }
+    out[k] = best;
+    const kk = `${cx},${cy}`;
+    const bucket = grid.get(kk);
+    if (bucket) bucket.push(k); else grid.set(kk, [k]);
+  }
+  return out;
 }
 
 /**
