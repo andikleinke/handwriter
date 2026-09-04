@@ -1,0 +1,438 @@
+/**
+ * Reveal maps: which pass of the pen uncovers each pixel of a glyph, and at
+ * what arc length along that pass it does so.
+ *
+ * The nib is a disk whose radius follows the ink's half-width, read from the
+ * distance map as a running minimum over 0.16 em of path, so a crossing or a
+ * knot - which inflates the distance map for a stroke-width or two - cannot
+ * widen it and reveal a piece of a stroke still to come. The passes are replayed in pen order and every pixel the disk
+ * touches for the first time is claimed by that pass at that arc length -
+ * first pass wins, exactly as ink on paper. The disk grows through the ink
+ * only, so it never reaches across a counter to the far side of a loop.
+ *
+ * Whatever the disks never touch - a wedge, the flare of a foot, the far side
+ * of a merge, a taper beyond the path's end - is handed to the nearest
+ * claimed pixel and appears just after it, like ink spreading from the nib.
+ * So a frame is always the font's own outline, cut by a round front, and
+ * nothing has to pop in when a stroke completes.
+ *
+ * The one exception is a join between letters. Where the pen flows from one
+ * letter into the next, the plan trims the first letter's exit hairline and
+ * bridges the gap; the font's own tail beyond that cut, and any entry
+ * hairline before the next letter's entry point, still exist as ink - two
+ * shapes overlapping at a slight angle, with a notch where they cross. That
+ * ink is never travelled, so it is hidden here (unless a real pass covers
+ * it), and the animator paints the bridge as one smooth ribbon in its place.
+ * The ribbon runs a short way (BLEND_EM) into both letters, reproducing the
+ * ink's own cross-section there, so it merges into the letters seamlessly.
+ */
+
+import { fontToRaster } from '../lib/raster.js';
+import { inkInfo } from '../lib/snap.js';
+import { pointAtLength, polylineLength } from '../lib/geometry.js';
+
+export const NIB_MIN_EM = 0.08;     // the nib's radius is the smallest half-width within this much path either way (past any knot)
+export const NIB_SLACK_PX = 1.0;    // the nib reaches this far past the measured half-width
+export const EDGE_RING_PX = 2;      // background this close to ink joins the map (the outline clips it)
+export const HIDDEN = -2;           // chain id of ink that is never shown (an untravelled tail at a join)
+export const BLEND_EM = 0.08;       // how far the join ribbon runs into each letter
+
+/**
+ * @param {object} analysis  glyphs with rasters and word offsets
+ * @param {Array}  chains    pen-down chains in time order (see timing.planChains)
+ * @param {number} upem
+ */
+export function buildRevealMaps(analysis, chains, upem) {
+  const glyphs = analysis.glyphs;
+  let scaleMin = Infinity;
+  for (const g of glyphs) if (g.raster && g.raster.scale < scaleMin) scaleMin = g.raster.scale;
+  if (!Number.isFinite(scaleMin)) return { glyphs: [], unassigned: 0 };
+  const step = 1 / scaleMin; // one raster pixel, in font units
+  const sampled = chains.map((c) => sampleChain(c, step, glyphs, upem));
+  const out = [];
+  let unassigned = 0;
+  glyphs.forEach((g, gi) => {
+    const m = g.raster ? buildGlyphMap(g, gi, chains, sampled, upem) : null;
+    out[gi] = m;
+    if (m) unassigned += m.unassigned;
+  });
+  return { glyphs: out, unassigned };
+}
+
+/** Samples along one chain with the nib radius (font units) at each. */
+function sampleChain(chain, step, glyphs, upem) {
+  const { poly, cum, L } = chain;
+  const n = Math.max(2, Math.floor(L / step) + 2);
+  const pts = new Array(n);
+  const s = new Float32Array(n);
+  const raw = new Float32Array(n);
+  const item = new Int16Array(n);
+  // which plan item (stroke or bridge) each arc length belongs to
+  const items = chain.items;
+  const ends = [];
+  let acc = 0;
+  for (const it of items) { acc += polylineLength(it.points); ends.push(acc); }
+  let ii = 0;
+  for (let k = 0; k < n; k++) {
+    const sk = Math.min(L, k * step);
+    s[k] = sk;
+    while (ii < ends.length - 1 && sk > ends[ii]) ii++;
+    item[k] = ii;
+    const p = pointAtLength(poly, cum, sk);
+    pts[k] = p;
+    let best = 0;
+    for (const g of glyphs) {
+      const r = g.raster;
+      if (!r) continue;
+      const [x, y] = fontToRaster(r, p[0] - g.x, p[1] - g.y);
+      const xi = Math.round(x), yi = Math.round(y);
+      if (xi < 0 || yi < 0 || xi >= r.width || yi >= r.height) continue;
+      const d = inkInfo(r).dist[yi * r.width + xi] / r.scale;
+      if (d > best) best = d;
+    }
+    raw[k] = best;
+  }
+  // a sample off the ink (a bridge over a gap, a smoothed path leaving a
+  // hairline) borrows its nearest inked neighbour
+  for (let k = 0; k < n; k++) {
+    if (raw[k] > 0) continue;
+    for (let j = 1; k - j >= 0 || k + j < n; j++) {
+      if (k - j >= 0 && raw[k - j] > 0) { raw[k] = raw[k - j]; break; }
+      if (k + j < n && raw[k + j] > 0) { raw[k] = raw[k + j]; break; }
+    }
+  }
+  // The radius is a running minimum: a crossing or a knot inflates the
+  // distance map for a stroke-width or so, and the window reaches past it to
+  // the band's own half-width on either side. It can only under-estimate -
+  // along a taper, by the taper's slope - and ink the nib misses follows it
+  // a moment later within the same pass (pass 2 below), which is invisible;
+  // over-estimating would sweep a piece of a crossing stroke still to come.
+  const W = Math.max(2, Math.round((NIB_MIN_EM * upem) / step));
+  const R = runningMin(raw, W);
+  return { pts, s, R, n, item };
+}
+
+function runningMin(a, W) {
+  const n = a.length;
+  const out = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    let m = Infinity;
+    for (let j = Math.max(0, k - W); j <= Math.min(n - 1, k + W); j++) if (a[j] < m) m = a[j];
+    out[k] = m;
+  }
+  return out;
+}
+
+/** Ink plus a thin ring of background around it, so the map covers the outline's edge. */
+function dilate(fill, w, h, rad) {
+  const out = new Uint8Array(fill);
+  const r2 = rad * rad;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (fill[i]) continue;
+      let hit = false;
+      for (let dy = -rad; dy <= rad && !hit; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -rad; dx <= rad; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w || dx * dx + dy * dy > r2) continue;
+          if (fill[ny * w + nx]) { hit = true; break; }
+        }
+      }
+      if (hit) out[i] = 1;
+    }
+  }
+  return out;
+}
+
+/** The domain pixel nearest a sample, within a couple of pixels; -1 if none. */
+function seedPixel(dom, w, h, xi, yi) {
+  for (let rad = 0; rad <= 2; rad++) {
+    for (let dy = -rad; dy <= rad; dy++) {
+      for (let dx = -rad; dx <= rad; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== rad) continue;
+        const x = xi + dx, y = yi + dy;
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        if (dom[y * w + x]) return y * w + x;
+      }
+    }
+  }
+  return -1;
+}
+
+function buildGlyphMap(g, gi, chains, sampled, upem) {
+  const r = g.raster;
+  const { width: w, height: h, fill } = r;
+  const N = w * h;
+  const dist = inkInfo(r).dist;
+  const dom = dilate(fill, w, h, EDGE_RING_PX);
+  const chain = new Int16Array(N).fill(-1);
+  const sArc = new Float32Array(N);
+  const stamp = new Int32Array(N);
+  const queue = new Int32Array(N);
+  const used = new Set();
+  let serial = 0;
+
+  /**
+   * Grow the nib's disk from (x, y) through the domain and claim pixels.
+   * mode 'stroke': claims unclaimed and hidden pixels; 'bridge': unclaimed
+   * only (a bridge never shows a join's untravelled ink); 'hide': marks
+   * pixels hidden - unclaimed ones, and ones its own chain claimed (the
+   * stroke's last nib disk reaching past the cut). With a `plane`, only
+   * pixels on its far side are claimed or hidden (the rest are still
+   * traversed): a hide stops at the cut, so the letter's real ink up to it
+   * is untouched; a bridge claims this letter's ink only beyond its cut, or
+   * only ahead of its entry, so a blunt entry end and whatever crosses it
+   * wait for the letter's own passes.
+   */
+  const disk = (x, y, Rpx, mode, ci, sk, plane) => {
+    if (x < -Rpx || y < -Rpx || x > w - 1 + Rpx || y > h - 1 + Rpx) return;
+    const seed = seedPixel(dom, w, h, Math.round(x), Math.round(y));
+    if (seed < 0) return;
+    serial++;
+    let head = 0, tail = 0;
+    queue[tail++] = seed;
+    stamp[seed] = serial;
+    const R2 = Rpx * Rpx;
+    while (head < tail) {
+      const i = queue[head++];
+      const c = chain[i];
+      const px = i % w, py = (i - px) / w;
+      const beyond = !plane || (px - plane.x) * plane.dx + (py - plane.y) * plane.dy >= 0;
+      if (mode === 'hide') {
+        if (beyond && (c === -1 || c === ci)) chain[i] = HIDDEN;
+      } else if (beyond && (c === -1 || (c === HIDDEN && mode === 'stroke'))) {
+        chain[i] = ci;
+        sArc[i] = sk;
+        used.add(ci);
+      }
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = py + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const nx = px + dx;
+          if (nx < 0 || nx >= w) continue;
+          const j = ny * w + nx;
+          if (stamp[j] === serial || !dom[j]) continue;
+          const ex = nx - x, ey = ny - y;
+          if (ex * ex + ey * ey > R2) continue;
+          stamp[j] = serial;
+          queue[tail++] = j;
+        }
+      }
+    }
+  };
+
+  // An untravelled hairline (raster px), from its cut point outward. The
+  // stroke's own pass reclaims whatever its nib covers around the cut, so
+  // the visible ink ends in the nib's round shape, never a corner; beyond
+  // the hairline's last point the sweep runs on a little, to take the tip
+  // (or a blunt end's corners) with it.
+  const at = (p) => {
+    const xi = Math.round(p[0]), yi = Math.round(p[1]);
+    return xi < 0 || yi < 0 || xi >= w || yi >= h ? 0 : dist[yi * w + xi];
+  };
+  // `before` is the stroke point just inside the cut: it gives the direction
+  // when the untravelled end is a single point (a blunt end with no hairline)
+  const extend = (path, before) => {
+    if (!path.length) return path;
+    const b = path[path.length - 1];
+    const a = path.length >= 2 ? path[path.length - 2] : before;
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const ext = at(path[0]) * 2 + 3;
+    return path.concat([[b[0] + ((b[0] - a[0]) / len) * ext, b[1] + ((b[1] - a[1]) / len) * ext]]);
+  };
+  const hideTube = (path, ci) => {
+    if (path.length < 2) return;
+    const d0 = Math.hypot(path[1][0] - path[0][0], path[1][1] - path[0][1]) || 1;
+    const plane = { x: path[0][0], y: path[0][1], dx: (path[1][0] - path[0][0]) / d0, dy: (path[1][1] - path[0][1]) / d0 };
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1], b = path[i];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      for (let u = 0; u <= len; u += 1) {
+        const t = len > 0 ? u / len : 0;
+        const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t;
+        // generous: a hairline's centreline sits a pixel or two off its middle
+        disk(x, y, at([x, y]) + NIB_SLACK_PX + 3, 'hide', ci, 0, plane);
+      }
+    }
+  };
+  // The untravelled hairlines of a stroke at a join, as raster-px paths from
+  // the cut outward: the tail beyond the exit cut, and a trimmed head before
+  // the entry point. A blunt entry (nothing trimmed) is not hidden: the
+  // ribbon arrives at the letter's full width and covers its end face. A
+  // stroke entered mid-way has no head either: the pen writes back over it.
+  const strokes = g.rasterStrokes || [];
+  const exitPath = (it) => {
+    const s = strokes[it.strokeIndex];
+    return extend(s.slice(it.tailCut), s[Math.max(0, it.tailCut - 1)]);
+  };
+  const entryPath = (it) => {
+    if (it.entry || !(it.headCut > 0)) return [];
+    const s = strokes[it.strokeIndex];
+    return extend(s.slice(0, it.headCut + 1).reverse(), s[Math.min(s.length - 1, it.headCut + 1)]);
+  };
+  const inGlyph = (it) => it.type === 'stroke' && it.glyphIndex === gi && strokes[it.strokeIndex];
+  const hasTail = (it) => inGlyph(it) && it.tailCut < strokes[it.strokeIndex].length - 1;
+  const hasHead = (it) => inGlyph(it) && !it.entry && it.headCut > 0;
+
+  // A bridge's claims in this raster stop at a plane: beyond the cut when
+  // this is the letter it leaves, ahead of the entry when this is the letter
+  // it enters (undefined: not this letter's bridge at all).
+  const planeAt = (p, d) => {
+    const [x, y] = fontToRaster(r, p[0] - g.x, p[1] - g.y);
+    const dx = d[0] * r.scale, dy = -d[1] * r.scale;
+    const l = Math.hypot(dx, dy) || 1;
+    return { x, y, dx: dx / l, dy: dy / l };
+  };
+  const bridgePlane = (it) => {
+    const pts = it.points;
+    if (!pts || pts.length < 2) return undefined;
+    const m = pts.length - 1;
+    if (it.from.glyphIndex === gi) return planeAt(pts[0], [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]]);
+    if (it.to.glyphIndex === gi) return planeAt(pts[m], [pts[m][0] - pts[m - 1][0], pts[m][1] - pts[m - 1][1]]);
+    return undefined;
+  };
+
+  // pass 1: the nib's disk, in pen order; first touch wins. A stroke claims
+  // only in its own glyph (overriding hidden ink there: a later pass crossing
+  // a join). When the pen leaves a stroke for a bridge, the stroke's
+  // untravelled tail and the next stroke's trimmed head are hidden before
+  // the bridge's samples run.
+  for (let ci = 0; ci < sampled.length; ci++) {
+    const sc = sampled[ci];
+    const items = chains[ci].items;
+    const planes = items.map((it) => (it.type === 'bridge' ? bridgePlane(it) : null));
+    let cur = -1;
+    for (let k = 0; k < sc.n; k++) {
+      const ii = sc.item[k];
+      if (ii !== cur) {
+        if (items[ii].type === 'bridge') {
+          if (cur >= 0 && hasTail(items[cur])) hideTube(exitPath(items[cur]), ci);
+          const next = items[ii + 1];
+          if (next && hasHead(next)) hideTube(entryPath(next), ci);
+        }
+        cur = ii;
+      }
+      const it = items[ii];
+      let mode, plane = null;
+      if (it.type === 'stroke') {
+        if (it.glyphIndex !== gi) continue;
+        mode = 'stroke';
+      } else {
+        plane = planes[ii];
+        if (plane === undefined) continue;
+        mode = 'bridge';
+      }
+      const p = sc.pts[k];
+      const [x, y] = fontToRaster(r, p[0] - g.x, p[1] - g.y);
+      disk(x, y, sc.R[k] * r.scale + NIB_SLACK_PX, mode, ci, sc.s[k], plane);
+    }
+  }
+
+  // remember what the nibs themselves claimed, before anything spreads
+  const nibChain = Int16Array.from(chain);
+  const nibS = Float32Array.from(sArc);
+  const corners = [];
+  for (let i = 0; i < N; i++) if (fill[i] && chain[i] === -1) corners.push(i);
+
+  // pass 2: everything else joins the nearest claimed pixel, a little later.
+  // Hidden ink first hands itself to the background fringe around it (so the
+  // outline's anti-aliased rim over a hidden tail stays hidden too), but never
+  // to ink: ink the nib missed always follows a visible neighbour.
+  const INF = 0x3fffffff;
+  const unitPerPx = 1 / r.scale;
+  const propagate = (isSeed, mayEnter, maxD, crossHidden) => {
+    const dd = new Int32Array(N).fill(INF);
+    // the visible pass a wave carries, even while crossing hidden pixels
+    const src = new Int16Array(N).fill(-1);
+    const srcS = new Float32Array(N);
+    const buckets = [];
+    const push = (d, i) => { (buckets[d] || (buckets[d] = [])).push(i); };
+    for (let i = 0; i < N; i++) if (isSeed(i)) { dd[i] = 0; src[i] = chain[i]; srcS[i] = sArc[i]; push(0, i); }
+    for (let d = 0; d < buckets.length && d <= maxD; d++) {
+      const b = buckets[d];
+      if (!b) continue;
+      for (const i of b) {
+        if (dd[i] !== d) continue;
+        const px = i % w, py = (i - px) / w;
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = py + dy;
+          if (ny < 0 || ny >= h) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = px + dx;
+            if (nx < 0 || nx >= w) continue;
+            const j = ny * w + nx;
+            if (!dom[j]) continue;
+            const nd = d + (dx && dy ? 4 : 3);
+            if (nd >= dd[j]) continue;
+            const free = chain[j] === -1 || dd[j] < INF;
+            if (free && !mayEnter(j)) continue;
+            if (!free && !(crossHidden && chain[j] === HIDDEN)) continue;
+            dd[j] = nd;
+            if (free) {
+              chain[j] = src[i] >= 0 ? src[i] : chain[i];
+              sArc[j] = srcS[i] + ((dx && dy ? 4 : 3) / 3) * unitPerPx;
+              src[j] = chain[j];
+              srcS[j] = sArc[j];
+            } else {
+              src[j] = src[i];
+              srcS[j] = srcS[i] + ((dx && dy ? 4 : 3) / 3) * unitPerPx;
+            }
+            push(nd, j);
+          }
+        }
+      }
+    }
+  };
+  propagate((i) => chain[i] === HIDDEN, (j) => !fill[j], 3 * EDGE_RING_PX + 1, false);
+  // ink behind a hidden hairline still belongs to a visible pass: cross it
+  propagate((i) => chain[i] >= 0, () => true, INF, true);
+
+  // pass 3: where two passes meet, the ink in the corners between them
+  // belongs to neither nib's tube. It exists only because both strokes are
+  // there, so it appears with the later one - not as a knot on the first
+  // stroke through the crossing, foreshadowing the one still to come.
+  const CR = 8, CR2 = CR * CR;
+  const timeOf = (c, s) => c * 1e7 + s;
+  const passGap = 0.08 * upem; // arc length that separates two passes of one chain
+  for (const i of corners) {
+    if (chain[i] < 0) continue;
+    const px = i % w, py = (i - px) / w;
+    let lateT = -Infinity, lateJ = -1, lateD2 = 0;
+    for (let dy = -CR; dy <= CR; dy++) {
+      const ny = py + dy;
+      if (ny < 0 || ny >= h) continue;
+      for (let dx = -CR; dx <= CR; dx++) {
+        const d2 = dx * dx + dy * dy;
+        if (d2 > CR2) continue;
+        const nx = px + dx;
+        if (nx < 0 || nx >= w) continue;
+        const j = ny * w + nx;
+        if (nibChain[j] < 0) continue;
+        const t = timeOf(nibChain[j], nibS[j]);
+        if (t > lateT) { lateT = t; lateJ = j; lateD2 = d2; }
+      }
+    }
+    if (lateJ < 0) continue;
+    const own = timeOf(chain[i], sArc[i]);
+    if (lateT - own <= passGap) continue; // the same pass: a bulge, not a corner
+    chain[i] = nibChain[lateJ];
+    sArc[i] = nibS[lateJ] + Math.sqrt(lateD2) * unitPerPx;
+  }
+
+  let unassigned = 0, hidden = 0, count = 0;
+  for (let i = 0; i < N; i++) {
+    if (dom[i]) count++;
+    if (fill[i] && chain[i] === -1) unassigned++;
+    if (fill[i] && chain[i] === HIDDEN) hidden++;
+  }
+  const domain = new Int32Array(count);
+  for (let i = 0, q = 0; i < N; i++) if (dom[i]) domain[q++] = i;
+
+  return { w, h, chain, s: sArc, domain, chainsUsed: [...used].sort((a, b) => a - b), unassigned, hidden };
+}
