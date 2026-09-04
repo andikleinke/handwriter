@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Handwriter prototype</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Handwriter <button id="versionbtn" class="versionbtn" type="button" title="version history">prototype</button></h1>
+      <div id="versionlist" class="versionlist" hidden></div>
+      <p class="sub">
+        a pen model that writes letters from taught strokes with human dynamics, or a
+        font's own outline uncovered along its recovered pen path.
+      </p>
+    </header>
+
+    <main>
+      <section class="panel controls">
+        <div class="row">
+          <label class="field grow">
+            <span>Text</span>
+            <textarea id="text" rows="1" autocomplete="off" spellcheck="false" title="Enter analyses; Shift+Enter starts a new line">hello</textarea>
+          </label>
+          <button id="analyze" class="primary">Analyze</button>
+        </div>
+        <div class="row wrap small">
+          <label class="field">
+            <span>Source</span>
+            <select id="source" title="where the letterforms and the pen path come from">
+              <option value="pen" selected>pen model · looped school hand and others</option>
+              <option value="font">font outline · recovered path</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Font</span>
+            <select id="fontpick" title="the bundled font, or any font you have added"></select>
+          </label>
+          <label class="field" id="penhandfield">
+            <span>Hand</span>
+            <select id="penhand" title="slant, tempo, nib and pressure of the pen model"></select>
+          </label>
+          <label class="ghostbtn" title="add a font file; it is kept in this browser for next time">
+            + Add font… <input id="fontfile" type="file" accept=".otf,.ttf,.woff" hidden />
+          </label>
+          <button id="fontremove" class="ghost" title="forget the selected font" hidden>Remove</button>
+          <label class="field">
+            <span>Raster em (px)</span>
+            <input id="rasterEm" type="number" min="128" max="1024" step="64" value="512" />
+          </label>
+          <label class="check"><input type="checkbox" id="outlines" checked /> outlines</label>
+          <label class="check"><input type="checkbox" id="arrows" checked /> arrowheads</label>
+          <label class="check"><input type="checkbox" id="numbers" checked /> numbers</label>
+          <label class="check"><input type="checkbox" id="nodes" checked /> endpoints</label>
+          <label class="check"><input type="checkbox" id="internals" /> raster + skeleton</label>
+          <label class="check" title="let the pen flow from one letter's exit straight into the next letter's entry"
+            ><input type="checkbox" id="connect" checked /> connect letters</label
+          >
+          <button id="clearcache" class="ghost">Clear stroke cache</button>
+        </div>
+        <div id="penrow" class="row wrap small">
+          <label class="field">
+            <span>Slant <b id="penslantval">20</b>°</span>
+            <input id="penslant" type="range" min="0" max="45" step="1" value="20" />
+          </label>
+          <label class="field">
+            <span>Tempo <b id="pentempoval">100</b> ms/stroke</span>
+            <input id="pentempo" type="range" min="60" max="180" step="5" value="100" />
+          </label>
+          <label class="field">
+            <span>Looseness <b id="penvarval">0.5</b></span>
+            <input id="penvar" type="range" min="0" max="1" step="0.05" value="0.5" />
+          </label>
+          <label class="field">
+            <span>Nib</span>
+            <select id="pennib">
+              <option value="pointed">pointed (shaded)</option>
+              <option value="mono">monoline</option>
+              <option value="broad">broad edge</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Wrap at</span>
+            <input id="penwrap" type="number" min="0" max="60" step="1" value="0" title="line width in em; 0 writes each line as typed" style="width:70px" />
+          </label>
+          <button id="pentake" class="ghost" title="the same text with different small deviations">Another take</button>
+          <button id="penfit" class="ghost" title="derive a hand from the current font: its recovered pen paths become the letters, its stems the slant, its stroke widths the nib">Fit hand from font</button>
+          <button id="penhandremove" class="ghost" title="forget this fitted hand" hidden>Remove hand</button>
+          <button id="penhanddownload" class="ghost" title="the fitted hand as JSON, for scripts/fit-check.mjs" hidden>Download hand</button>
+        </div>
+        <div id="fontinfo" class="meta">Loading font…</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Animation preview</h2>
+          <div id="animmeta" class="meta right">the pen model: letters written from their taught strokes, timed by the kinematic model, inked by the nib</div>
+        </div>
+        <div class="stage paper player">
+          <canvas id="anim"></canvas>
+          <div class="player-controls">
+            <button id="playpause" class="ctl" title="play"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.2v11.6L13.5 8z"/></svg></button>
+            <button id="record" class="ctl" title="records one run of the preview; the take downloads when it ends"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/></svg><span>Record</span></button>
+            <input id="scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="position" />
+            <span id="timecode" class="tc">0.0 / 0.0 s</span>
+          </div>
+        </div>
+        <div class="row wrap playback">
+          <label class="field grow">
+            <span>Avg speed <b id="speedval">2.2</b> em/s</span>
+            <input id="speed" type="range" min="0.3" max="4" step="0.1" value="2.2" />
+          </label>
+          <label class="check"><input type="checkbox" id="showpen" checked /> pen tip</label>
+          <label class="check" title="curvature-dependent speed with ease in/out, instead of constant speed"
+            ><input type="checkbox" id="natural" checked /> natural speed</label
+          >
+          <label class="check"><input type="checkbox" id="loop" checked /> loop</label>
+          <button id="exportsvg" class="ghost" title="saves the written word as an SVG file (the ink as filled paths)" hidden>Export SVG</button>
+          <a id="takelink" class="takelink" hidden></a>
+          <span id="takeinfo" class="meta"></span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Debug view</h2>
+          <div class="zoomctl" title="scroll to zoom at the cursor · drag empty space to pan">
+            <button class="ghost" data-zoom="out">−</button>
+            <span class="meta zoomval">100%</span>
+            <button class="ghost" data-zoom="in">+</button>
+            <button class="ghost" data-zoom="reset">fit</button>
+          </div>
+          <button id="lettermode" class="ghost" title="work through the alphabet letter by letter, correcting each letter's pen path once for every word that uses it">A–Z letters</button>
+          <div id="shapinginfo" class="meta right"></div>
+        </div>
+        <div id="letterpanel" hidden>
+          <div id="letterstrip" class="letterstrip"></div>
+          <div class="handtools">
+            <div id="letterinfo" class="meta"></div>
+            <button id="handsave" class="ghost" title="save every hand-edited letter of this font to a file">⤓ save hand</button>
+            <label class="ghost filebtn" title="load hand-edited letters from a file saved here earlier"
+              >⤒ load hand<input type="file" id="handfile" accept="application/json,.json" hidden
+            /></label>
+          </div>
+        </div>
+        <div class="stage"><canvas id="debug"></canvas></div>
+        <div id="strokelist" class="strokelist"></div>
+        <div class="editor">
+          <div id="drawtools">
+            <button id="drawMode" class="ghost" title="draw a new pen path over the letter; it becomes a stroke of that glyph">✎ draw stroke</button>
+            <label class="check" title="pull hand-placed points onto the ink's centreline"
+              ><input type="checkbox" id="snapInk" checked /> snap to ink</label
+            >
+            <span id="edithint" class="meta"
+              >Click a stroke to edit it, then click one of its points to pick it. Drag a point to
+              reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point.
+              ⌘Z / ⌘⇧Z undo and redo.</span
+            >
+          </div>
+          <div id="editcontrols" hidden>
+            <span id="editlabel" class="meta"></span>
+            <button id="undoEdit" class="ghost" title="nothing to undo" disabled>↶ undo</button>
+            <button id="redoEdit" class="ghost" title="nothing to redo" disabled>↷ redo</button>
+            <button id="deletePoint" class="ghost" title="click a point on the stroke first" disabled>⌫ delete point</button>
+            <button id="moveEarlier" class="ghost">◀ earlier</button>
+            <button id="moveLater" class="ghost">later ▶</button>
+            <button id="reverseStroke" class="ghost">⇄ reverse direction</button>
+            <button id="splitStroke" class="ghost" title="click a point on the stroke in the view above to place the split">✂ split here</button>
+            <button id="deleteStroke" class="ghost" title="removes the pen pass; the ink is revealed by the nearest remaining stroke">🗑 delete stroke</button>
+            <button id="resetGlyph" class="ghost">↺ re-run this glyph</button>
+            <button id="deselect" class="ghost">✕ deselect</button>
+          </div>
+        </div>
+        <div id="internalsview" class="internals" hidden></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Heuristic uncertainty log</h2>
+          <div id="logcount" class="meta right"></div>
+        </div>
+        <div id="log" class="log"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Stroke data (JSON)</h2>
+          <div class="right">
+            <button id="copyjson" class="ghost">Copy</button>
+            <button id="downloadjson" class="ghost">Download</button>
+          </div>
+        </div>
+        <pre id="json" class="json"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
