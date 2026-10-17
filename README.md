@@ -14,6 +14,16 @@ dropped in through the font picker.
 The build's version is in the page title (`Stroke recovery prototype vX.Y.Z`,
 from `package.json`), so a screenshot or a recording names the build.
 
+## Hosted
+
+The built site is published at <https://andikleinke.github.io/handwriter/>
+(GitHub Pages, from the `gh-pages` branch of
+<https://github.com/andikleinke/handwriter>). `npm run deploy` builds and
+publishes it. Everything runs in the browser there; only *Export movie*
+needs the local dev server on a Mac, because the frames are encoded with
+AVFoundation. Hand edits and the stroke cache live in the browser's own
+storage, per site.
+
 ## Run it
 
 ```bash
