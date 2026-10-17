@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.26.0",
+    "tag": "v0.26.0",
+    "date": "2026-10-17",
+    "note": "v0.26.0 — a join's corridor is drawn by the bands alone while the pen is near it"
+  },
+  {
     "version": "0.25.0",
     "tag": "v0.25.0",
     "date": "2026-10-17",

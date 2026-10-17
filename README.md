@@ -671,6 +671,17 @@ glyph instead, and `src/render/animator.js` plays it:
   bridge's samples run linearly from the last cross-section of the stroke
   the pen leaves to the first of the one it lands on. On `he` the profile
   through the join is a straight 19 → 15 px taper.
+- **A join's corridor is the bands' alone while the pen is near it
+  (v0.26.0).** With the widths right the join still showed lumps, and they
+  were the raster map's: within a letter's first samples its fallback
+  revealed the merged ink at the entry (the `e`'s eye bottom) and, with
+  raster edges, bits around the hook the pen left behind. So 0.1 em of path
+  either side of a bridge is a corridor in which the raster layer is erased
+  (destination-out, a polygon 1.6 widths wide) until the pen has passed it;
+  there the join is exactly the taper between the two letters' clean
+  widths, and the leftover ink fills in once the pen is 0.1 em on. The
+  draw order is now: raster layers, corridor erase, bridge bands, stroke
+  bands.
 - **Leftover ink joins the nearest path, not the nearest claimed pixel.**
   Ink no nib reached used to join whichever claimed pixel was nearest, which
   beside a wide claim is that claim whatever stroke the ink lies on. It now

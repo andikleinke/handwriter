@@ -32,6 +32,9 @@ const FRONT_FEATHER_PX = 1.5;
 // two agree to the sub-pixel and holding the map back only left slivers
 // along a shade's free edge until the pen had moved on.
 const BAND_LAG_EM = 0;
+// Either side of a bridge, this much of each letter's path belongs to the
+// join's corridor, where only the bands draw until the pen has passed it.
+const JOIN_CORRIDOR_EM = 0.1;
 
 export class Animator {
   constructor(canvas) {
@@ -237,21 +240,21 @@ export class Animator {
     const prog = timeline.chains.map((c) => (T < c.t0 ? -Infinity : T >= c.t1 ? Infinity : arcAt(c, T)));
     const done = T >= timeline.total;
 
-    // the joins between letters first, under the letters: a bridge band is
-    // drawn as it is, with the planner's taper from one ink width to the
-    // other, and runs a few samples into each letter so the seam between it
-    // and the letter's own band lies inside ink the letter draws over
-    if (this._bands.bridges) {
-      if (!done) for (const band of this._bands.bridges) this._paintBand(band, prog[band.chain]);
-    } else {
-      for (const rb of this._ribbons) {
-        const p = prog[rb.chain];
-        const revealed = p === Infinity ? rb.L : p === -Infinity ? 0 : Math.min(rb.L, p - rb.s0);
-        if (revealed > 0) this._paintRibbon(rb, revealed);
+    // 1. the raster maps, clipped by the outlines: what the bands below do
+    // not cover (leftover ink, the chain ends' discs)
+    const withClip = (gi, g, paint) => {
+      const p2d = this._paths[gi];
+      ctx.save();
+      if (p2d) {
+        // the outline itself is the edge; the layer only decides what is uncovered
+        ctx.translate(layout.originX + g.x * layout.s, layout.baselineY - g.y * layout.s);
+        ctx.scale(layout.s, layout.s);
+        ctx.clip(p2d, 'nonzero');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
-    }
-    if (done) for (const rb of this._ribbons) this._paintRibbon(rb, rb.L);
-
+      paint();
+      ctx.restore();
+    };
     analysis.glyphs.forEach((g, gi) => {
       const layer = this.layers[gi];
       const map = this.maps.glyphs[gi];
@@ -262,20 +265,40 @@ export class Animator {
         layer.key = key;
       }
       const place = rasterPlacement(layout, g);
-      const p2d = this._paths[gi];
-      ctx.save();
-      if (p2d) {
-        // the outline itself is the edge; the layer only decides what is uncovered
-        ctx.translate(layout.originX + g.x * layout.s, layout.baselineY - g.y * layout.s);
-        ctx.scale(layout.s, layout.s);
-        ctx.clip(p2d, 'nonzero');
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      withClip(gi, g, () => ctx.drawImage(layer.canvas, place.dx, place.dy, place.dw, place.dh));
+    });
+    // 2. a join's corridor is the bands' alone while the pen is in or near it
+    if (!done && this._bands.corridors) {
+      for (const c of this._bands.corridors) {
+        const p = prog[c.chain];
+        if (p === -Infinity || p === Infinity || p > c.until) continue;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        c.poly.forEach((q, i) => { const [x, y] = this._toCss(q); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
       }
-      ctx.drawImage(layer.canvas, place.dx, place.dy, place.dw, place.dh);
-      // the strokes themselves, as vector bands over the raster: their edges
-      // through a junction are lines, not pixels
-      if (!done) for (const band of this._bands[gi] || []) this._paintBand(band, prog[band.chain]);
-      ctx.restore();
+    }
+    // 3. the joins between letters, under the letters: a bridge band is one
+    // polygon from the last cross-section of the letter it leaves to the
+    // first of the letter it reaches
+    if (this._bands.bridges) {
+      if (!done) for (const band of this._bands.bridges) this._paintBand(band, prog[band.chain]);
+    } else {
+      for (const rb of this._ribbons) {
+        const p = prog[rb.chain];
+        const revealed = p === Infinity ? rb.L : p === -Infinity ? 0 : Math.min(rb.L, p - rb.s0);
+        if (revealed > 0) this._paintRibbon(rb, revealed);
+      }
+    }
+    if (done) for (const rb of this._ribbons) this._paintRibbon(rb, rb.L);
+    // 4. the strokes themselves, as vector bands over the raster, clipped by
+    // their outlines: their edges through a junction are lines, not pixels
+    if (!done) analysis.glyphs.forEach((g, gi) => {
+      if (!this.layers[gi] || !this.maps.glyphs[gi]) return;
+      withClip(gi, g, () => { for (const band of this._bands[gi] || []) this._paintBand(band, prog[band.chain]); });
     });
 
 
@@ -421,6 +444,7 @@ function makeLayer(map, ink) {
 function buildBands(maps, chains, glyphs) {
   const out = glyphs.map(() => []);
   out.bridges = [];
+  out.corridors = [];
   maps.sampled.forEach((sc, ci) => {
     const items = chains[ci].items;
     const glyphOf = (k) => { const it = items[sc.item[k]]; return it.type === 'stroke' ? it.glyphIndex : -1; };
@@ -465,12 +489,28 @@ function buildBands(maps, chains, glyphs) {
         push(j, l0 + (l1 - l0) * t, r0 + (r1 - r0) * t);
       }
       close();
+      // The join's corridor: JOIN_CORRIDOR_EM of path either side of the
+      // bridge, wide enough to hold the ink, where only the bands draw while
+      // the pen is near. The raster map's fallback there reveals the merged
+      // ink at a letter's entry (an `e` enters along its own eye) and the
+      // untravelled hook of the letter left behind, with raster edges, which
+      // is what made a join look like three pieces however the bands tapered.
+      const reach = JOIN_CORRIDOR_EM * upemOf(glyphs);
+      let c0 = a0, c1 = b0;
+      while (c0 > 0 && sc.s[a0] - sc.s[c0 - 1] <= reach) c0--;
+      while (c1 + 1 < sc.n && sc.s[c1 + 1] - sc.s[b0] <= reach) c1++;
+      const wide = Math.max(l0, r0, l1, r1) * 1.6 + 0.02 * upemOf(glyphs);
+      const L = [], R = [];
+      for (let j = c0; j <= c1; j++) { const ed = edges(j, wide, wide); L.push(ed.l); R.push(ed.r); }
+      out.corridors.push({ chain: ci, until: sc.s[c1], poly: [...L, ...R.reverse()] });
       k = e;
     }
     close();
   });
   return out;
 }
+
+const upemOf = (glyphs) => glyphs.find((g) => g.record)?.record.unitsPerEm || 1000;
 
 /**
  * The joins of the timeline as paintable ribbons. A ribbon follows the chain
