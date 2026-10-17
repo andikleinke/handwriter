@@ -37,9 +37,11 @@ export const CROSS_CAP = 1.8;       // how far past that radius the measured cro
 export const CROSS_SLEW = 0.35;     // ...and how fast it may widen along the path (font units per unit travelled)
 export const JUNCTION_MAX_EM = 0.3;  // a crossing this short is redrawn straight through; longer is a retrace
 export const JUNCTION_NEAR_EM = 0.15; // this far into a retrace the pen still has the width it arrived with
-export const THIN_IN_THICK = 0.6;    // a pen entering a junction thinner than this fraction of the nib radius there is a hairline inside a shade
+export const JUNCTION_EDGE_EM = 0.05; // ...and this far in, its clean edge continues as a straight line
+export const THIN_IN_THICK = 1.5;    // ink this many times thicker than where a pointed pen's upstroke came in is a shade around a hairline
 export const NIB_SLACK_PX = 1.0;    // the nib reaches this far past the measured half-width
 export const PASS_GAP_EM = 0.08;    // arc length that separates two passes of one chain over the same ink
+export const EDGE_BIAS_PX = 0.5;    // a reading runs to the first background sample; the ink's last sample is this much short of it
 export const EDGE_RING_PX = 2;      // background this close to ink joins the map (the outline clips it)
 export const HIDDEN = -2;           // chain id of ink that is never shown (an untravelled tail at a join)
 export const BLEND_EM = 0.08;       // how far the join ribbon runs into each letter
@@ -270,7 +272,7 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
     // short run of clean samples, and the mean tangent there
     const window = 0.08 * upem;
     const clean = (from, dir) => {
-      const vals = [[], []];
+      const vals = [[], [], []];
       let tx = 0, ty = 0;
       for (let i = from; i >= 0 && i < sc.n && Math.abs(sc.s[i] - sc.s[from]) <= window; i += dir) {
         if (junction[i]) break;
@@ -278,12 +280,14 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
         if (sc.tan[2 * i] * sc.tan[2 * from] + sc.tan[2 * i + 1] * sc.tan[2 * from + 1] < 0.5) break;
         vals[0].push(sc.halfL[i]);
         vals[1].push(sc.halfR[i]);
+        vals[2].push(sc.R[i]);
         tx += sc.tan[2 * i]; ty += sc.tan[2 * i + 1];
       }
       // a run shorter than half the window (the tip of a hairpin) is no measure
       if (vals[0].length * step < window / 2) return null;
       const l = Math.hypot(tx, ty) || 1;
-      return { half: vals.map((v) => { v.sort((p, q) => p - q); return v[v.length >> 1]; }), tan: [tx / l, ty / l] };
+      const med = vals.map((v) => { v.sort((p, q) => p - q); return v[v.length >> 1]; });
+      return { half: [med[0], med[1]], R: med[2], tan: [tx / l, ty / l] };
     };
     const hermite = (p0, t0, p1, t1, t) => {
       const L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
@@ -298,14 +302,19 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
     const raw = [Float32Array.from(sc.halfL), Float32Array.from(sc.halfR)];
     sc.raw = raw; sc.sides = sides; // for inspection
     const win = Math.max(1, Math.round(window / step));
-    const medianOf = (side, i, k, e) => {
+    const medianOf = (side, i, k, e, edgeOnly = false) => {
       const vals = [];
-      for (let j = Math.max(k, i - win); j <= Math.min(e, i + win); j++) vals.push(raw[side][j]);
+      for (let j = Math.max(k, i - win); j <= Math.min(e, i + win); j++) {
+        if (edgeOnly && !sc.edge[2 * j + side]) continue;
+        vals.push(raw[side][j]);
+      }
+      if (!vals.length) return null;
       vals.sort((p, q) => p - q);
       return vals[vals.length >> 1];
     };
     // a stretch is cut where the pen turns back on itself (the foot of a
-    // retraced stem): the legs are different strokes, each with its own width
+    // retraced stem) or round a corner (the `J`'s bar into its stem): the
+    // legs are different strokes, each with its own width and its own line
     const turn = Math.max(2, Math.round((0.04 * upem) / step));
     let k = 0;
     while (k < sc.n) {
@@ -313,19 +322,71 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
       let e = k;
       while (e + 1 < sc.n && junction[e + 1]) e++;
       const legs = [];
-      let start = k;
+      let start = k, hairpin = false;
       for (let i = k + turn; i <= e; i++) {
-        if (sc.tan[2 * i] * sc.tan[2 * (i - turn)] + sc.tan[2 * i + 1] * sc.tan[2 * (i - turn) + 1] >= 0) continue;
+        const dot = sc.tan[2 * i] * sc.tan[2 * (i - turn)] + sc.tan[2 * i + 1] * sc.tan[2 * (i - turn) + 1];
+        if (dot >= 0.5) continue;
         const cut = i - (turn >> 1);
-        if (cut > start) { legs.push([start, cut - 1]); start = cut; i = cut + turn; }
+        if (cut > start) { legs.push([start, cut - 1, hairpin]); start = cut; hairpin = dot < -0.5; i = cut + turn; }
       }
-      legs.push([start, e]);
-      for (const [a, b] of legs) {
-        const before = a === k && k > 0 ? clean(k - 1, -1) : null;
+      legs.push([start, e, hairpin]);
+      let carriedR = null;
+      for (const [a, b, afterHairpin] of legs) {
+        // what the leg brings in: the clean run before the stretch, or, past
+        // a corner (not a hairpin: there the pen is on another stroke), the
+        // width the previous leg ended with - a hairline that bends stays a
+        // hairline
+        const before = a === k ? (k > 0 ? clean(k - 1, -1) : null)
+          : afterHairpin ? null
+            : { half: [sc.halfL[a - 1], sc.halfR[a - 1]], R: carriedR, tan: [sc.tan[2 * (a - 1)], sc.tan[2 * (a - 1) + 1]] };
+        // the nib radius where this stroke came in, carried through its corners
+        if (before) carriedR = before.R;
         const after = b === e && e + 1 < sc.n ? clean(e + 1, 1) : null;
         const s0 = sc.s[a > 0 ? a - 1 : a], s1 = sc.s[b + 1 < sc.n ? b + 1 : b];
         const short = before && after && sc.s[b] - sc.s[a] <= JUNCTION_MAX_EM * upem;
+        // Through a crossing each EDGE of the stroke continues as a line
+        // from where it was last clean to where it is clean again (a Hermite
+        // curve with the pen's tangents there): the user's rule, taken
+        // literally - eight pixels wide going in and coming out, eight all
+        // the way through, and on the same line. The centreline and widths
+        // are then read off the two edges. Only if both edges stay on ink;
+        // a pointed pen's hairline inside a shade is handled below instead.
+        let edged = false;
         if (short) {
+          const edgeAt = (i, side) => {
+            const nx = -sc.tan[2 * i + 1], ny = sc.tan[2 * i];
+            const h = side === 0 ? sc.halfL[i] : -sc.halfR[i];
+            return [sc.pts[i][0] + nx * h, sc.pts[i][1] + ny * h];
+          };
+          const thinIn = pointed && before.half[0] + before.half[1] < THIN_IN_THICK * 2 * sc.R[a];
+          if (!thinIn) {
+            const L0 = edgeAt(a - 1, 0), L1 = edgeAt(b + 1, 0), R0 = edgeAt(a - 1, 1), R1 = edgeAt(b + 1, 1);
+            const fresh = [];
+            for (let i = a; i <= b; i++) {
+              const t = (sc.s[i] - s0) / (s1 - s0);
+              const l = hermite(L0, before.tan, L1, after.tan, t), r = hermite(R0, before.tan, R1, after.tan, t);
+              const mid = [(l[0] + r[0]) / 2, (l[1] + r[1]) / 2];
+              if (!onInk(mid)) break;
+              fresh.push({ mid, half: Math.hypot(l[0] - r[0], l[1] - r[1]) / 2 });
+            }
+            if (fresh.length === b - a + 1) {
+              edged = true;
+              for (let i = a; i <= b; i++) {
+                sc.pts[i] = fresh[i - a].mid;
+                sc.halfL[i] = sc.halfR[i] = fresh[i - a].half;
+                facing[2 * i] = facing[2 * i + 1] = 1;
+              }
+              for (let i = Math.max(1, a - 1); i <= Math.min(sc.n - 2, b + 1); i++) {
+                const q0 = sc.pts[i - 1], q1 = sc.pts[i + 1];
+                const dx = q1[0] - q0[0], dy = q1[1] - q0[1];
+                const l = Math.hypot(dx, dy) || 1;
+                sc.tan[2 * i] = dx / l;
+                sc.tan[2 * i + 1] = dy / l;
+              }
+            }
+          }
+        }
+        if (short && !edged) {
           const p0 = sc.pts[a - 1], p1 = sc.pts[b + 1];
           const fresh = [];
           for (let i = a; i <= b; i++) {
@@ -344,6 +405,7 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
             }
           }
         }
+        if (edged) continue;
         halves.forEach((half, side) => {
           for (let i = a; i <= b; i++) {
             const w0 = before?.half[side], w1 = after?.half[side];
@@ -352,28 +414,54 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
             const dIn = before ? sc.s[i] - sc.s[a] : Infinity, dOut = after ? sc.s[b] - sc.s[i] : Infinity;
             const near = short || Math.min(dIn, dOut) <= JUNCTION_NEAR_EM * upem;
             // through a crossing: the width brought in, running to the width
-            // taken out; just inside a long stretch: the width brought in
-            const own = !near ? null : short ? w0 + (w1 - w0) * ((sc.s[i] - s0) / (s1 - s0 || 1)) : dIn <= dOut ? w0 : w1;
+            // taken out; just inside a long stretch: the clean edge continued
+            // as a straight line (the bar of a `J` keeps its edge where it
+            // passes over the stem, whatever its centreline does there)
+            let own = null;
+            if (short) own = w0 + (w1 - w0) * ((sc.s[i] - s0) / (s1 - s0 || 1));
+            else if (near) {
+              const fromStart = dIn <= dOut;
+              const ref = fromStart ? before : after;
+              own = ref.half[side];
+              if (Math.min(dIn, dOut) <= JUNCTION_EDGE_EM * upem) {
+                // close to the clean run its edge is continued as a straight
+                // line (further out the run may be curving away)
+                const j = fromStart ? a - 1 : b + 1;
+                const nx = -ref.tan[1], ny = ref.tan[0]; // left normal of the clean run
+                const h = (side === 0 ? ref.half[0] : -ref.half[1]) - EDGE_BIAS_PX * step * (side === 0 ? 1 : -1);
+                const ex = sc.pts[j][0] + nx * h, ey = sc.pts[j][1] + ny * h;
+                const d = ((ex - sc.pts[i][0]) * nx + (ey - sc.pts[i][1]) * ny) * (side === 0 ? 1 : -1);
+                own = Math.max(0.5 * step, d) + EDGE_BIAS_PX * step; // the bias is taken off again below
+              }
+            }
             let v;
-            if (pointed && w0 !== undefined && w0 < THIN_IN_THICK * sc.R[i] && sc.tan[2 * i + 1] > -0.3) {
-              // a pointed pen's upstroke, come in far thinner than the ink here
-              // is thick: a hairline running inside a shade keeps its width -
+            if (pointed && w0 !== undefined && before.R && sc.R[i] > THIN_IN_THICK * before.R && sc.tan[2 * i + 1] > -0.3) {
+              // a pointed pen's upstroke, come in where the ink was much thinner
+              // than it is here: a hairline running inside a shade keeps its width -
               // the ink around it is the shade's, drawn on its own pass. It
               // stays thin through the turn at the top, however far that is;
-              // the shade begins as the pen heads down and presses
-              v = w0;
-            } else if (short) {
-              // through a crossing the pen keeps the width it brought - the
-              // readings there are of the union, and a reading that reaches
-              // background may have reached it through the other stroke's
-              // ink, in the hollow where the two outlines meet. The nib's
-              // radius is the floor: a pointed pen's shade often swells to its
-              // full width inside the join, and the radius follows that
-              v = Math.max(sc.R[i], own);
-            } else if (near) {
-              // just inside a long stretch: the width brought in, or this
-              // stroke's own free edge if it reads wider
-              v = Math.max(sc.R[i], other || !atEdge ? own : Math.max(read, own));
+              // the shade begins as the pen heads down and presses. Never past
+              // a valley, though: between two cores the valley is this
+              // hairline's own edge, and it may be thinner than it came in
+              // (the `e`'s eye is a finer hairline than the entry it grows from)
+              v = Math.min(w0, read);
+            } else if (short || near) {
+              // through a crossing, or just inside a long stretch, the pen
+              // keeps the width it brought (the readings there are of the
+              // union; even one that reaches background may have got there
+              // through the other stroke's ink, in the hollow where the two
+              // outlines meet), or its own free edge if that reads wider. The
+              // nib's radius is a floor only for a stroke that is at least
+              // that wide on its free side - a pointed pen's shade swelling to
+              // its full width inside the join - because the radius itself
+              // reads the union near a crossing (the `J`'s bar is 8.5 px
+              // where it crosses the stem and the radius says 9: a tab)
+              const freeRead = sc.edge[2 * i + (1 - side)] ? raw[1 - side][i] : 0;
+              const floor = freeRead >= sc.R[i] ? sc.R[i] : 0;
+              // a reading runs to the centre of the first background pixel,
+              // a quarter pixel past the edge on average: on a side facing
+              // another stroke that quarter is the other stroke's
+              v = Math.max(floor, other || !atEdge ? own - EDGE_BIAS_PX * step : Math.max(read, own));
             } else if (other || !atEdge) {
               // deep in a retrace or a merge, with nothing clean to hold to: the
               // reading, smoothed, and never less than the nib's own radius
@@ -383,8 +471,13 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
             }
             // never past a reading that reached background: whatever lifted
             // the width above it (the nib's radius, the width brought in) is
-            // an estimate, the background is a fact
-            half[i] = atEdge ? Math.min(v, read) : v;
+            // an estimate, the background is a fact. The readings that reach
+            // it are taken together over the window, not one by one: along a
+            // shallow crossing a reading finds background through the hollow
+            // at one sample and not the next, and sample by sample that cut
+            // a serrated edge into the first stroke of Pinyon's `x`
+            const bg = atEdge ? medianOf(side, i, a, b, true) : null;
+            half[i] = bg !== null ? Math.min(v, bg) : v;
             // in a junction the band stops half a pixel inside its width on
             // both sides instead of reaching a pixel past it: what lies past
             // it may be the other stroke, even past a reading that found
@@ -908,20 +1001,22 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
   };
   propagate((i) => chain[i] === HIDDEN, (j) => !fill[j], 3 * EDGE_RING_PX + 1, false);
 
-  // Ink no nib reached joins the pass whose *path* is nearest through the
-  // ink, at that path's arc plus the distance - not the nearest claimed
-  // pixel. Measured from claimed pixels, a leftover beside a wide claim
-  // joins that claim whichever stroke it lies on; measured from the
-  // centrelines it joins the stroke it is part of. On the `L` that is the
-  // difference between 27 pixels of the stem showing with the bowl and 2. A
-  // pixel already claimed is passed through and keeps its pass and arc.
+  // Ink no nib reached joins the band it touches, at that band's arc plus
+  // the distance. v0.19.0 measured from the centrelines instead, because a
+  // band then could run into the stroke beside it and a leftover next to
+  // that inflated claim joined the wrong stroke; with the bands held to
+  // their own widths that is no longer so, and measuring from the
+  // centrelines has the opposite fault: a hairline running inside a shade
+  // is the nearest centreline to much of the shade, so specks of the shade
+  // appeared beside the hairline as it was drawn. A pixel already claimed
+  // is passed through and keeps its pass and arc.
   {
     const dd = new Int32Array(N).fill(INF);
     const src = new Int16Array(N).fill(-1);
     const srcS = new Float32Array(N);
     const buckets = [];
     const push = (d, i) => { (buckets[d] || (buckets[d] = [])).push(i); };
-    for (let i = 0; i < N; i++) if (centreChain[i] >= 0) { dd[i] = 0; src[i] = centreChain[i]; srcS[i] = centreS[i]; push(0, i); }
+    for (let i = 0; i < N; i++) if (nibChain[i] >= 0) { dd[i] = 0; src[i] = nibChain[i]; srcS[i] = nibS[i]; push(0, i); }
     for (let d = 0; d < buckets.length; d++) {
       const b = buckets[d];
       if (!b) continue;
@@ -955,15 +1050,16 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
   // there, so it appears with the later one - not as a knot on the first
   // stroke through the crossing, foreshadowing the one still to come.
   //
-  // Only ink that really lies *between* the two passes: a corner pixel is
-  // deferred when the later pass is no further from it than the nearest pass
-  // is. Ink that hugs the stroke under the pen is that stroke's own, however
-  // soon another pass crosses beside it - a pen writing a wide shade covers
-  // more than its own nib radius, and the ink either side of a crossing is
-  // part of the shade, not of the wedge. Deferring that punched holes into a
-  // stroke as it was written, which filled in when the crossing arrived.
+  // Any corner pixel with a later pass within reach is deferred to it. When
+  // the band was the nib's inscribed disk, ink beside it was still the
+  // stroke's own (a wide shade covers more than its nib radius) and deferring
+  // it punched holes into a stroke as it was written; the band now claims
+  // the measured cross-section, so what is left beside it is the union's -
+  // the fillet where two outlines meet - and a pen leaves that with the
+  // second stroke. Splitting it by nearest band instead drew the fillet as
+  // a serrated edge on the first stroke of a shallow crossing (Pinyon's `x`).
   const CR = 8, CR2 = CR * CR;
-  const WEDGE_SLACK_PX = 1.5;
+  const WEDGE_SLACK_PX = CR;
   const timeOf = (c, s) => c * 1e7 + s;
   const passGap = PASS_GAP_EM * upem;
   for (const i of corners) {

@@ -730,6 +730,35 @@ glyph instead, and `src/render/animator.js` plays it:
   40, "hello" 357 → 314, "Kleinke" 652 → 450; Pinyon `z` 346 → 165, `b` 33
   → 28, `o` 50 → 28, "hello" 628 → 392, "Kleinke" 2115 → 1659, "quick fox"
   1358 → 637.
+- **The strokes are drawn as vector bands; the map only fills in behind
+  (v0.21.0).** However exactly the widths were chosen, the reveal was a
+  raster mask - one cell per raster pixel - and on a free edge the outline
+  clipped it to a vector edge, but inside a junction there is no outline to
+  clip against, so the boundary between one stroke's claim and the next was
+  a pixel edge, visible as a step at any zoom. Now every stroke (and every
+  join) is also a polygon - the centreline with the measured cross-section
+  at every sample, the same numbers the map uses - filled up to the pen with
+  a flat front and clipped by the glyph's outline, drawn over the raster
+  layer. A junction's edge is a line. What the band does not cover (the
+  fillet where two outlines meet, a shade's swell past the reading) the
+  raster still reveals, and that ink goes to the *later* of the two strokes
+  within reach: a pen leaves the fillet with the second stroke, and
+  splitting it by nearest band drew it as a serrated edge on the first.
+  With bands the junction rules sharpened too: through a short crossing each
+  *edge* is continued as a Hermite curve from where it was last clean to
+  where it is clean again, and the centreline and width are read off the
+  two edges; a stretch is cut at corners as well as hairpins, a leg past a
+  corner keeps the width of the leg before (a hairline that bends stays a
+  hairline), a pointed pen's upstroke is a hairline inside a shade when the
+  ink got 1.5x thicker than where it came in (and never wider than its own
+  valley: the `e`'s eye is a finer hairline than the entry it grows from),
+  the nib-radius floor applies only to a stroke at least that wide on its
+  free side (the radius itself reads the union near a crossing), a clean
+  edge continues straight for 0.05 em into a long stretch, and a reading to
+  background counts from the ink's last sample, taken as the median over the
+  window rather than one by one. `scripts/inspect.js` renders frames at an
+  arc or a time, draws the map with the late ink marked, and prints a
+  chain's readings with their edge and facing flags.
 - **Leftover ink joins the nearest path, not the nearest claimed pixel.**
   Ink no nib reached used to join whichever claimed pixel was nearest, which
   beside a wide claim is that claim whatever stroke the ink lies on. It now
@@ -1070,6 +1099,21 @@ the command instead. `versions.json` is generated from the tags by the release
 script and is never edited by hand.
 
 ## Known rough edges
+
+- **Autography's `J`: the stem pokes above the bar, and the pen never goes
+  there.** The recovered path runs the bar out and back and turns down the
+  stem from inside the bar, so the overshoot above it has no pass of its own
+  and appears as the pen rounds the corner. That is a pen-order defect, not
+  a reveal one: the bar wants to be its own stroke and the stem to start at
+  its real top (the hand editor can set that per letter; a general rule for
+  crossbars is still open).
+- **Pinyon's `x`: a serrated edge on the first stroke where the second
+  crosses it at a shallow angle**, from readings that alternately do and do
+  not find background through the hollow between the two outlines. The
+  median over the window did not settle it.
+- **Pinyon's `e`: the entry hairline turns into the eye as a short thick
+  hook** - the carried entry width meets the eye's much finer hairline
+  within a few samples.
 
 - The nib percentile (0.75) assumes a crossing takes up less than a quarter
   of the ±0.08 em window. Where two strokes run nearly parallel through each

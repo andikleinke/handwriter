@@ -103,6 +103,24 @@ export async function atArc(arcs, box, width = 2400, ci = 0) {
   return { times: times.map((t) => +t.toFixed(3)), W, H };
 }
 
+/** Whole frames at fractions of the timeline's total time, side by side. */
+export async function atTime(fracs, box = [0, 0, 1, 1], width = 1600) {
+  const total = A().timeline.total;
+  const { frames, W, H } = renderAt(fracs.map((f) => f * total), width);
+  const sx = box[0] * W, sy = box[1] * H, sw = (box[2] - box[0]) * W, sh = (box[3] - box[1]) * H;
+  const ow = Math.round(960 / frames.length), oh = Math.round(ow * sh / sw);
+  const out = document.createElement('canvas');
+  out.width = ow * frames.length; out.height = oh;
+  const o = out.getContext('2d');
+  frames.forEach((c, i) => {
+    o.fillStyle = '#f3efe6'; o.fillRect(i * ow, 0, ow, oh);
+    o.drawImage(c, sx, sy, sw, sh, i * ow, 0, ow, oh);
+    o.strokeStyle = '#999'; o.strokeRect(i * ow + 0.5, 0.5, ow - 1, oh - 1);
+  });
+  show(out);
+  return { total };
+}
+
 /** The frame box (fractions) that shows raster pixels x0..x1, y0..y1 of glyph gi at the given render width. */
 export function boxOfRaster(x0, y0, x1, y1, width = 2400, gi = 0) {
   const a = A();

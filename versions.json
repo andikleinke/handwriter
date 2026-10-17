@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.21.0",
+    "tag": "v0.21.0",
+    "date": "2026-10-17",
+    "note": "v0.21.0 — strokes are drawn as vector bands in pen order; the reveal map only fills in behind them"
+  },
+  {
     "version": "0.20.0",
     "tag": "v0.20.0",
     "date": "2026-10-17",

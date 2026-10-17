@@ -22,7 +22,7 @@ import { setupHiDPI, computeLayout, rasterPlacement } from './layout.js';
 import { buildTimeline, planChains, arcAt, penState, DEFAULT_SPEED_MODEL } from '../lib/timing.js';
 import { cumulativeLengths, pointAtLength } from '../lib/geometry.js';
 import { fontToRaster } from '../lib/raster.js';
-import { buildRevealMaps, HIDDEN, BLEND_EM } from './sweep.js';
+import { buildRevealMaps, HIDDEN, BLEND_EM, NIB_SLACK_PX } from './sweep.js';
 
 // The pen model's native tempo maps to this slider value; the slider scales it.
 const PEN_NOMINAL_SPEED = 2.2;
@@ -30,6 +30,11 @@ const PEN_NOMINAL_SPEED = 2.2;
 // Soft leading edge of the reveal, in raster px: enough to anti-alias the
 // front, never enough to show ink ahead of the nib.
 const FRONT_FEATHER_PX = 1.5;
+// How far behind the pen the raster map fills in what a stroke's band claimed
+// (font em). Zero: the map's edge pixels carry fractional coverage, so the
+// two agree to the sub-pixel and holding the map back only left slivers
+// along a shade's free edge until the pen had moved on.
+const BAND_LAG_EM = 0;
 
 export class Animator {
   constructor(canvas) {
@@ -53,6 +58,7 @@ export class Animator {
     this.bottomInset = 0;                   // CSS px at the bottom kept free of the word (player controls)
     this._paths = [];
     this._ribbons = [];
+    this._bands = [];
     this.pen = null;                        // a written word from the pen model, instead of an analysis
   }
 
@@ -74,6 +80,7 @@ export class Animator {
     this.chains = [];
     this._paths = [];
     this._ribbons = [];
+    this._bands = [];
     this.pen = result;
     // the ink each chain lays down: a ribbon at the nib's width
     for (const c of this.pen.chains) {
@@ -104,6 +111,7 @@ export class Animator {
     this.maps = buildRevealMaps(analysis, this.chains, this._upem());
     this._paths = analysis.glyphs.map((g) => (g.path ? new Path2D(g.path) : null));
     this.layers = analysis.glyphs.map((g, gi) => makeLayer(this.maps.glyphs[gi], this.ink));
+    this._bands = buildBands(this.maps, this.chains, analysis.glyphs);
     this.rebuildTimeline(false);
     this.resize();
   }
@@ -304,7 +312,7 @@ export class Animator {
       if (!layer || !map) return;
       const key = map.chainsUsed.map((ci) => prog[ci]).join(',') + (done ? '|end' : '');
       if (layer.key !== key) {
-        revealLayer(layer, map, prog, done, FRONT_FEATHER_PX / g.raster.scale);
+        revealLayer(layer, map, prog, done, FRONT_FEATHER_PX / g.raster.scale, BAND_LAG_EM * this._upem());
         layer.key = key;
       }
       const place = rasterPlacement(layout, g);
@@ -318,19 +326,66 @@ export class Animator {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
       ctx.drawImage(layer.canvas, place.dx, place.dy, place.dw, place.dh);
+      // the strokes themselves, as vector bands over the raster: their edges
+      // through a junction are lines, not pixels
+      if (!done) for (const band of this._bands[gi] || []) this._paintBand(band, prog[band.chain]);
       ctx.restore();
     });
 
-    for (const rb of this._ribbons) {
-      const p = prog[rb.chain];
-      const revealed = p === Infinity ? rb.L : p === -Infinity ? 0 : Math.min(rb.L, p - rb.s0);
-      if (revealed > 0) this._paintRibbon(rb, revealed);
+    // the joins between letters: bands too, unclipped, with the widths the
+    // junction rules gave them (an entry hairline stays a hairline into a
+    // shade); the older ribbons stay as the fallback when no map is built
+    if (this._bands.bridges) {
+      if (!done) for (const band of this._bands.bridges) this._paintBand(band, prog[band.chain]);
+    } else {
+      for (const rb of this._ribbons) {
+        const p = prog[rb.chain];
+        const revealed = p === Infinity ? rb.L : p === -Infinity ? 0 : Math.min(rb.L, p - rb.s0);
+        if (revealed > 0) this._paintRibbon(rb, revealed);
+      }
     }
+    if (done) for (const rb of this._ribbons) this._paintRibbon(rb, rb.L);
 
     if (this.showPen && T < timeline.total) {
       const st = penState(timeline, T);
       if (st) this._drawPen(this._toCss(st.at), st.kind === 'up');
     }
+  }
+
+  /**
+   * One stroke's band, filled up to the chain's progress `p` (font units of
+   * arc) with a flat front at the pen. The band is the stroke's own
+   * cross-section at every sample, as the reveal map measured it; on a free
+   * edge it reaches a little past the ink and the outline clips it, on a side
+   * facing another stroke it stops exactly at the width.
+   */
+  _paintBand(band, p) {
+    if (p === -Infinity || p < band.s[0]) return;
+    const { ctx } = this;
+    const { s, left, right } = band;
+    const n = s.length;
+    let m = 0;
+    if (p === Infinity || p >= s[n - 1]) m = n - 1;
+    else { while (m + 1 < n && s[m + 1] <= p) m++; }
+    let lF = left[m], rF = right[m];
+    if (m + 1 < n && p !== Infinity && p < s[n - 1]) {
+      const t = (p - s[m]) / (s[m + 1] - s[m] || 1);
+      lF = [left[m][0] + (left[m + 1][0] - left[m][0]) * t, left[m][1] + (left[m + 1][1] - left[m][1]) * t];
+      rF = [right[m][0] + (right[m + 1][0] - right[m][0]) * t, right[m][1] + (right[m + 1][1] - right[m][1]) * t];
+    }
+    ctx.save();
+    ctx.fillStyle = this.ink;
+    ctx.beginPath();
+    const p0 = this._toCss(left[0]);
+    ctx.moveTo(p0[0], p0[1]);
+    for (let k = 1; k <= m; k++) { const q = this._toCss(left[k]); ctx.lineTo(q[0], q[1]); }
+    const lc = this._toCss(lF), rc = this._toCss(rF);
+    ctx.lineTo(lc[0], lc[1]);
+    ctx.lineTo(rc[0], rc[1]);
+    for (let k = m; k >= 0; k--) { const q = this._toCss(right[k]); ctx.lineTo(q[0], q[1]); }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   /** The join ribbon, filled up to arc length `upTo` (font units) with a round front. */
@@ -409,6 +464,50 @@ function makeLayer(map, ink) {
   const R = (rgb >> 16) & 255, G = (rgb >> 8) & 255, B = rgb & 255;
   for (let i = 0; i < d.length; i += 4) { d[i] = R; d[i + 1] = G; d[i + 2] = B; }
   return { canvas, ctx, img, key: '' };
+}
+
+/**
+ * Every stroke of every chain as a vector band: per glyph, the runs of
+ * samples that lie on one of the glyph's own strokes, with the left and
+ * right edges the reveal map measured (word coordinates, font units). A
+ * bridge is not a band - the join ribbons below paint those - and a run that
+ * leaves a glyph ends where it leaves.
+ *
+ * Why bands on top of the raster map at all: the map is one cell per raster
+ * pixel, and on a free edge the outline clips it to a vector edge, but
+ * inside a junction there is no outline to clip against, so the step
+ * between one stroke's claim and the next was a pixel edge however exactly
+ * the widths were chosen. The band draws that same edge as a line.
+ */
+function buildBands(maps, chains, glyphs) {
+  const out = glyphs.map(() => []);
+  out.bridges = [];
+  maps.sampled.forEach((sc, ci) => {
+    const items = chains[ci].items;
+    let run = null;
+    const close = () => {
+      if (run && run.s.length >= 2) (run.glyph < 0 ? out.bridges : out[run.glyph]).push(run);
+      run = null;
+    };
+    for (let k = 0; k < sc.n; k++) {
+      const it = items[sc.item[k]];
+      // a stroke's band lives in its glyph (and is clipped by its outline); a
+      // bridge's is drawn as it is, so it carries no slack past the ink
+      const gi = it.type === 'stroke' ? it.glyphIndex : -1;
+      if (gi >= 0 && !glyphs[gi]?.raster) { close(); continue; }
+      if (!run || run.glyph !== gi) { close(); run = { chain: ci, glyph: gi, s: [], left: [], right: [] }; }
+      const slack = gi < 0 ? 0 : NIB_SLACK_PX / glyphs[gi].raster.scale; // a raster pixel, in font units
+      const [x, y] = sc.pts[k];
+      const nx = -sc.tan[2 * k + 1], ny = sc.tan[2 * k]; // the left normal
+      const hl = sc.halfL[k] + (sc.facing[2 * k] ? 0 : slack);
+      const hr = sc.halfR[k] + (sc.facing[2 * k + 1] ? 0 : slack);
+      run.s.push(sc.s[k]);
+      run.left.push([x + nx * hl, y + ny * hl]);
+      run.right.push([x - nx * hr, y - ny * hr]);
+    }
+    close();
+  });
+  return out;
 }
 
 /**
@@ -553,8 +652,8 @@ function buildRibbons(timeline, analysis, upem) {
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /** Write the per-pixel alpha for the chains' current progress. */
-function revealLayer(layer, map, prog, done, featherUnits) {
-  const { chain, s, domain, cover, chain2, s2 } = map;
+function revealLayer(layer, map, prog, done, featherUnits, bandLagUnits) {
+  const { chain, s, domain, cover, chain2, s2, prov } = map;
   const d = layer.img.data;
   for (let q = 0; q < domain.length; q++) {
     const i = domain[q];
@@ -566,10 +665,15 @@ function revealLayer(layer, map, prog, done, featherUnits) {
       a = done ? 255 : 0;
     } else {
       const p = prog[ci];
+      // a pixel a stroke's band claimed is drawn by the vector band while
+      // the pen is near it; the raster fills in behind, once the pen has
+      // moved on, so whatever sliver the two disagree on never shows as a
+      // pixel step at the junction the band just drew
+      const lag = prov[i] === 1 ? bandLagUnits : 0;
       if (p === Infinity) a = 255;
       else if (p === -Infinity) a = 0;
       else {
-        const f = (p - s[i]) / featherUnits + 1;
+        const f = (p - lag - s[i]) / featherUnits + 1;
         a = f <= 0 ? 0 : f >= 1 ? 255 : (f * 255) | 0;
       }
       // a pixel on the edge of its owner's band, with another pass's ink
