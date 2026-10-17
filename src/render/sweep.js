@@ -52,6 +52,7 @@ export function buildRevealMaps(analysis, chains, upem) {
   if (!Number.isFinite(scaleMin)) return { glyphs: [], unassigned: 0 };
   const step = 1 / scaleMin; // one raster pixel, in font units
   const sampled = chains.map((c) => sampleChain(c, step, glyphs, upem));
+  capWidthsAtJunctions(sampled, step, upem);
   const out = [];
   let unassigned = 0;
   glyphs.forEach((g, gi) => {
@@ -59,7 +60,7 @@ export function buildRevealMaps(analysis, chains, upem) {
     out[gi] = m;
     if (m) unassigned += m.unassigned;
   });
-  return { glyphs: out, unassigned };
+  return { glyphs: out, unassigned, sampled }; // sampled: for inspection
 }
 
 /** Samples along one chain with the nib radius (font units) at each. */
@@ -142,6 +143,114 @@ function sampleChain(chain, step, glyphs, upem) {
   slewLimit(halfL, s, CROSS_SLEW);
   slewLimit(halfR, s, CROSS_SLEW);
   return { pts, s, R, n, item, halfL, halfR, tan };
+}
+
+/**
+ * Through a junction a stroke keeps the width it arrived with.
+ *
+ * The cross-section is measured perpendicular to the path, out to the ink's
+ * edge or to the valley between two cores. Where two strokes cross at a
+ * shallow angle there is no valley - their edges simply merge - and the
+ * measurement runs on into the other stroke. That was the square nub on the
+ * `L` and `J`: 356 of 358 pixels of the stem shown during the bowl were
+ * claimed by the bowl's band where `hr` had grown to 13.8 px against a nib
+ * radius of 10.
+ *
+ * Holding the band to the nib radius there removed the nub, and starved every
+ * shaded stroke that crosses another: a pointed pen's shade is wider than the
+ * circle inscribed in it, so the `z` and `b` lost ink at their crossings and
+ * it came back late. The right bound is the stroke's own width as it enters
+ * the junction - the pen does not change width because another stroke is
+ * near - taken as the median over a short run of clean samples just before
+ * the junction stretch (after it, for a stretch at the start of a chain), and
+ * never less than the nib radius. Inside the stretch the measured width may
+ * fall below that (a taper), never exceed it.
+ *
+ * Only the side that faces the other stroke. The inflation is one-sided -
+ * on the `L` it was `hr` that grew while `hl` never moved - and a shade
+ * swells through a crossing on its own convex side, which is a real width,
+ * not a measurement running into something. Capping both sides starved the
+ * `z` and `b` at their crossings; capping the facing side leaves the swell.
+ *
+ * "Another pass" is another chain, or the same chain far enough along to be
+ * the stroke crossing itself; neighbouring samples are always within reach
+ * and do not count. The reach is generous - half as much again as the two
+ * half-widths - because edges merge well before centrelines meet.
+ */
+function capWidthsAtJunctions(sampled, step, upem) {
+  const margin = 2 * step;
+  const minGap = 0.12 * upem;
+  let cell = margin;
+  for (const sc of sampled) for (let k = 0; k < sc.n; k++) cell = Math.max(cell, sc.halfL[k], sc.halfR[k]);
+  cell *= 3;
+  const grid = new Map();
+  sampled.forEach((sc, ci) => {
+    for (let k = 0; k < sc.n; k++) {
+      const key = `${Math.floor(sc.pts[k][0] / cell)},${Math.floor(sc.pts[k][1] / cell)}`;
+      const b = grid.get(key);
+      if (b) b.push(ci, k); else grid.set(key, [ci, k]);
+    }
+  });
+  sampled.forEach((sc, ci) => {
+    // which side of the path the other pass lies on, per sample
+    const sides = [new Uint8Array(sc.n), new Uint8Array(sc.n)]; // [left, right]
+    const junction = new Uint8Array(sc.n);
+    for (let k = 0; k < sc.n; k++) {
+      const [x, y] = sc.pts[k];
+      const tx = sc.tan[2 * k], ty = sc.tan[2 * k + 1];
+      const reach = Math.max(sc.halfL[k], sc.halfR[k]);
+      const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+      for (let gx = cx - 1; gx <= cx + 1; gx++) {
+        for (let gy = cy - 1; gy <= cy + 1; gy++) {
+          const b = grid.get(`${gx},${gy}`);
+          if (!b) continue;
+          for (let i = 0; i < b.length; i += 2) {
+            const cj = b[i], j = b[i + 1];
+            const o = sampled[cj];
+            if (cj === ci && Math.abs(o.s[j] - sc.s[k]) < minGap) continue;
+            const dx = o.pts[j][0] - x, dy = o.pts[j][1] - y;
+            const limit = 1.5 * (reach + Math.max(o.halfL[j], o.halfR[j])) + margin;
+            if (dx * dx + dy * dy >= limit * limit) continue;
+            // the normal (-ty, tx) points to the left of travel
+            const across = dx * -ty + dy * tx;
+            sides[across >= 0 ? 0 : 1][k] = 1;
+            junction[k] = 1;
+          }
+        }
+      }
+    }
+    sc.junction = junction;
+    // the width the pen brought into each junction stretch
+    const window = 0.08 * upem;
+    const entering = (half, from, dir) => {
+      const vals = [];
+      const flagged = half === sc.halfL ? sides[0] : sides[1];
+      for (let i = from; i >= 0 && i < sc.n && Math.abs(sc.s[i] - sc.s[from]) <= window; i += dir) {
+        if (flagged[i]) break;
+        vals.push(half[i]);
+      }
+      if (!vals.length) return null;
+      vals.sort((p, q) => p - q);
+      return vals[vals.length >> 1];
+    };
+    [sc.halfL, sc.halfR].forEach((half, side) => {
+      const flagged = sides[side];
+      let k = 0;
+      while (k < sc.n) {
+        if (!flagged[k]) { k++; continue; }
+        let e = k;
+        while (e + 1 < sc.n && flagged[e + 1]) e++;
+        const before = k > 0 ? entering(half, k - 1, -1) : null;
+        const after = e + 1 < sc.n ? entering(half, e + 1, 1) : null;
+        const own = before ?? after;
+        for (let i = k; i <= e; i++) {
+          const cap = Math.max(sc.R[i], own ?? sc.R[i]);
+          half[i] = Math.min(half[i], cap);
+        }
+        k = e + 1;
+      }
+    });
+  });
 }
 
 /**
@@ -288,6 +397,12 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
   const dom = dilate(fill, w, h, EDGE_RING_PX);
   const chain = new Int16Array(N).fill(-1);
   const sArc = new Float32Array(N);
+  // the pen's own centreline: the pixel under each sample, with its pass and arc
+  const centreChain = new Int16Array(N).fill(-1);
+  const centreS = new Float32Array(N);
+  // provenance, for inspection: 1 band, 2 disk, 4 nearest path, 5 wedge
+  const prov = new Uint8Array(N);
+  const claimS = new Float32Array(N); // the arc of the sample whose band or disk claimed it
   const stamp = new Int32Array(N);
   const queue = new Int32Array(N);
   const used = new Set();
@@ -350,6 +465,7 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
       } else if (beyond && (c === -1 || (c === HIDDEN && mode === 'stroke'))) {
         chain[i] = ci;
         sArc[i] = sk + alongHere / r.scale;
+        prov[i] = 1; claimS[i] = sk;
         used.add(ci);
       }
       const acrossHere = Math.abs((px - x) * -ty + (py - y) * tx);
@@ -397,6 +513,7 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
       } else if (beyond && (c === -1 || (c === HIDDEN && mode === 'stroke'))) {
         chain[i] = ci;
         sArc[i] = sk;
+        prov[i] = 2; claimS[i] = sk;
         used.add(ci);
       }
       for (let dy = -1; dy <= 1; dy++) {
@@ -520,6 +637,12 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
       }
       const p = sc.pts[k];
       const [x, y] = fontToRaster(r, p[0] - g.x, p[1] - g.y);
+      // the sample's own pixel: where pass 2 measures from
+      const cx0 = Math.round(x), cy0 = Math.round(y);
+      if (cx0 >= 0 && cy0 >= 0 && cx0 < w && cy0 < h && dom[cy0 * w + cx0] && centreChain[cy0 * w + cx0] < 0) {
+        centreChain[cy0 * w + cx0] = ci;
+        centreS[cy0 * w + cx0] = sc.s[k];
+      }
       // the ends of a chain keep the nib's round tip; between them the band
       // of ink the stroke's own cross-section covers
       if (k === 0 || k === sc.n - 1) {
@@ -592,8 +715,48 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
     }
   };
   propagate((i) => chain[i] === HIDDEN, (j) => !fill[j], 3 * EDGE_RING_PX + 1, false);
-  // ink behind a hidden hairline still belongs to a visible pass: cross it
-  propagate((i) => chain[i] >= 0, () => true, INF, true);
+
+  // Ink no nib reached joins the pass whose *path* is nearest through the
+  // ink, at that path's arc plus the distance - not the nearest claimed
+  // pixel. Measured from claimed pixels, a leftover beside a wide claim
+  // joins that claim whichever stroke it lies on; measured from the
+  // centrelines it joins the stroke it is part of. On the `L` that is the
+  // difference between 27 pixels of the stem showing with the bowl and 2. A
+  // pixel already claimed is passed through and keeps its pass and arc.
+  {
+    const dd = new Int32Array(N).fill(INF);
+    const src = new Int16Array(N).fill(-1);
+    const srcS = new Float32Array(N);
+    const buckets = [];
+    const push = (d, i) => { (buckets[d] || (buckets[d] = [])).push(i); };
+    for (let i = 0; i < N; i++) if (centreChain[i] >= 0) { dd[i] = 0; src[i] = centreChain[i]; srcS[i] = centreS[i]; push(0, i); }
+    for (let d = 0; d < buckets.length; d++) {
+      const b = buckets[d];
+      if (!b) continue;
+      for (const i of b) {
+        if (dd[i] !== d) continue;
+        const px = i % w, py = (i - px) / w;
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = py + dy;
+          if (ny < 0 || ny >= h) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = px + dx;
+            if (nx < 0 || nx >= w) continue;
+            const j = ny * w + nx;
+            if (!dom[j]) continue;
+            const nd = d + (dx && dy ? 4 : 3);
+            if (nd >= dd[j]) continue;
+            dd[j] = nd;
+            src[j] = src[i];
+            srcS[j] = srcS[i] + ((dx && dy ? 4 : 3) / 3) * unitPerPx;
+            if (chain[j] === -1) { chain[j] = src[j]; sArc[j] = srcS[j]; prov[j] = 4; }
+            push(nd, j);
+          }
+        }
+      }
+    }
+  }
 
   // pass 3: where two passes cross, the ink in the wedges between them
   // belongs to neither nib's tube. It exists only because both strokes are
@@ -636,6 +799,7 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
     if (Math.sqrt(lateD2) > Math.sqrt(nearD2) + WEDGE_SLACK_PX) continue; // beside a pass, not between two
     chain[i] = nibChain[lateJ];
     sArc[i] = nibS[lateJ] + Math.sqrt(lateD2) * unitPerPx;
+    prov[i] = 5;
   }
 
   let unassigned = 0, hidden = 0, count = 0;
@@ -647,5 +811,5 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
   const domain = new Int32Array(count);
   for (let i = 0, q = 0; i < N; i++) if (dom[i]) domain[q++] = i;
 
-  return { w, h, chain, s: sArc, domain, chainsUsed: [...used].sort((a, b) => a - b), unassigned, hidden };
+  return { w, h, chain, s: sArc, domain, chainsUsed: [...used].sort((a, b) => a - b), unassigned, hidden, prov, claimS };
 }

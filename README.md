@@ -678,6 +678,27 @@ glyph instead, and `src/render/animator.js` plays it:
   it missed went to whichever pass was nearest - at a crossing, the one still
   to come. That is what broke pieces out of a shade as it was written and
   filled them in when the crossing arrived.
+- **Through a junction a stroke keeps the width it arrived with (v0.19.0).**
+  Every notch, nub and gap where strokes meet had one cause, finally pinned
+  down by recording which mechanism claimed each pixel: where two strokes
+  cross at a shallow angle there is no valley between their cores - their
+  edges simply merge - and the cross-section measured perpendicular to the
+  path runs on into the other stroke. On the `L`, 356 of the 358 pixels of
+  the stem that showed while the bowl was still being drawn were claimed by
+  the bowl's band where `hr` had grown to 13.8 px against a nib radius of 10,
+  and only on the side facing the stem; `hl` never moved. So wherever another
+  pass is within reach (another chain, or the same chain far enough along to
+  be the stroke crossing itself), the side of the band that faces it is held
+  to the width the stroke brought into the junction - the median over a short
+  run of clean samples just before it, never below the nib radius. The other
+  side keeps its measured width, which is what lets a shade swell through a
+  crossing; capping both sides starved the `z` and `b`.
+- **Leftover ink joins the nearest path, not the nearest claimed pixel.**
+  Ink no nib reached used to join whichever claimed pixel was nearest, which
+  beside a wide claim is that claim whatever stroke the ink lies on. It now
+  joins the stroke whose centreline is nearest through the ink, at that
+  stroke's arc plus the distance. On the `L` that is 27 pixels of stem
+  showing with the bowl against 2.
 - **First pass wins, per pixel.** The passes are replayed in pen order. Every
   pixel the disk touches for the first time is claimed by that chain at that
   arc length - so a pixel's reveal time is the moment the nib first covers
@@ -1018,6 +1039,9 @@ script and is never edited by hand.
   other - a very shallow crossing - the nib can still follow the union and
   sweep a little of the stroke still to come.
 - **Where a stroke runs alongside its own later pass the seam is ragged.**
+  (Still true after v0.19.0, which fixed junctions where strokes *cross*:
+  the `o`'s seam measures 305 neighbouring-pixel arc jumps against 230
+  before, and nothing else moved.)
   The right side of an `o` is written twice: the bowl closes over it, and the
   exit swirl retraces it about 1200 units of arc later. Both passes have a
   claim on the overlap - the earlier takes what its own cross-section covers,

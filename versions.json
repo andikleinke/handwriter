@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.19.0",
+    "tag": "v0.19.0",
+    "date": "2026-10-17",
+    "note": "v0.19.0 — junctions: a stroke keeps its own width where another crosses it, and leftover ink joins the nearest path"
+  },
+  {
     "version": "0.18.0",
     "tag": "v0.18.0",
     "date": "2026-10-17",
