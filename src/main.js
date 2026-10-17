@@ -5,6 +5,7 @@
 
 import autographyUrl from '../FONTFILE.otf?url';
 import pinyonUrl from '../PinyonScript-Regular.ttf?url';
+import msmadiUrl from '../MsMadi-Regular.ttf?url';
 import { version } from '../package.json';
 import versions from '../versions.json';
 import { loadFont } from './lib/shaping.js';
@@ -222,6 +223,7 @@ async function useFont(arrayBuffer, name) {
 const BUNDLED = {
   pinyon: { url: pinyonUrl, file: 'PinyonScript-Regular.ttf', label: 'Pinyon Script (default)' },
   autography: { url: autographyUrl, file: 'FONTFILE.otf', label: 'Autography' },
+  msmadi: { url: msmadiUrl, file: 'MsMadi-Regular.ttf', label: 'Ms Madi' },
 };
 const DEFAULT_FONT = 'pinyon';
 // Older pages stored the one bundled face as 'default', which meant "I never

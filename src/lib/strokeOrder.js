@@ -31,6 +31,7 @@ const W = {
   extraStroke: 1.2,     // penalty per stroke beyond the theoretical minimum
   retrace: 1.0,         // penalty per unit share of path that re-covers written ink
   retraceLong: 3.0,     // per em of any single run back beyond 0.35 em: a hand lifts instead
+  barTrace: 6.0,        // per em run back along a crossbar, or climbed up a stem to reach one: a bar is its own stroke
   turn: 0.9,            // penalty for sharp corners taken at junctions
   startTopLeft: 1.0,
   entry: 1.4,           // lowercase cursive: start on the entry hairline at the left
@@ -972,6 +973,54 @@ function scoreParts(comp, decomp, minStrokes, entryBias, template, frame, em, ha
   const longRetrace = mergesConvention
     ? strokes.reduce((s, k) => s + (k.retraces || []).reduce((t, r) => t + Math.max(0, r.length - 0.35 * em), 0), 0) / em
     : 0;
+  // A crossbar is written as its own stroke in every hand. The pen does not
+  // run out along a bar and back to get off it, and it does not climb back
+  // up a stem it has written (a `J`, having gone down and round, 0.5 em up
+  // again) to reach the bar at the top: it lifts. A running hand's `p` does
+  // climb its stem, to write the bowl - so the climb costs only when what
+  // follows it is a bar: flat, in the upper part of the letter, and short.
+  const barLike = (pts) => {
+    if (pts.length < 2) return false;
+    const a = pts[0], b = pts[pts.length - 1];
+    const dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]);
+    const sb = bboxOf(pts);
+    const upper = (a[1] + b[1]) / 2 < comp.bbox.y1 + 0.45 * Math.max(comp.bbox.h, 1e-6);
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    return dx > 2.5 * dy && sb.h < 0.35 * Math.max(sb.w, 1e-6) && upper && len >= 0.15 * em && len < 0.9 * em;
+  };
+  // The climb is found on the path itself, not in the walk's bookkeeping: a
+  // run of points that rise over ink the same stroke wrote earlier (a knot
+  // in the skeleton can offer a second way up a stem that the walk counts
+  // as new ink).
+  const climbToBar = (pts) => {
+    const n = pts.length;
+    if (n < 4) return 0;
+    const cum = [0];
+    for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const tol = 0.03 * em, gap = 0.15 * em;
+    const revisit = pts.map((p, i) => {
+      for (let j = 0; j < i; j++) {
+        if (cum[i] - cum[j] < gap) break;
+        if (Math.hypot(p[0] - pts[j][0], p[1] - pts[j][1]) < tol) return true;
+      }
+      return false;
+    });
+    let total = 0;
+    for (let i = 0; i < n; ) {
+      if (!revisit[i]) { i++; continue; }
+      let e = i;
+      while (e + 1 < n && revisit[e + 1]) e++;
+      const len = cum[e] - cum[i], rise = pts[i][1] - pts[e][1]; // rise > 0: climbing
+      if (len >= 0.3 * em && rise > 0.5 * len && barLike(pts.slice(e))) total += len;
+      i = e + 1;
+    }
+    return total;
+  };
+  const barTrace = strokes.reduce((s, k) => s + climbToBar(k.pts) + (k.retraces || []).reduce((t, r) => {
+    const dx = Math.abs(r.to[0] - r.from[0]), dy = Math.abs(r.to[1] - r.from[1]);
+    return t + (dx > 2.5 * dy && barLike([r.from, r.to]) ? r.length : 0);
+  }, 0), 0) / em;
   const stress = strokes.reduce((s, k) => s + (k.stress || 0), 0);
   const shadeUp = strokes.reduce((s, k) => s + (k.bad || 0), 0);
   const pointed = !!(hand && hand.pointed);
@@ -1061,7 +1110,7 @@ function scoreParts(comp, decomp, minStrokes, entryBias, template, frame, em, ha
     longest: W.longestShare * (longest / totalLen),
     // lifting is cheap for an engrosser and dear for a running hand
     extra: -(pointed && !hand.continuous ? W.extraStrokePointed : W.extraStroke) * Math.max(0, strokes.length - minStrokes),
-    retrace: -W.retrace * (retraced / totalLen) - W.retraceLong * longRetrace,
+    retrace: -W.retrace * (retraced / totalLen) - W.retraceLong * longRetrace - W.barTrace * barTrace,
     turn: -W.turn * meanTurn,
     start: W.startTopLeft * startScore,
     entry: W.entry * entry,

@@ -19,7 +19,7 @@ import { buildSkeletonGraph } from './graph.js';
 import { orderStrokes } from './strokeOrder.js';
 import { resample, smoothPreservingCorners, simplifyRDP, polylineLength, roundPts, cumulativeLengths } from './geometry.js';
 
-export const RECORD_VERSION = 25;
+export const RECORD_VERSION = 30;
 
 /**
  * @param {{gid:number,name:string,path:string,bbox:object,xAdvance:number,chars:string}} glyph

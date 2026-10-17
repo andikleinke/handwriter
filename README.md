@@ -759,6 +759,20 @@ glyph instead, and `src/render/animator.js` plays it:
   window rather than one by one. `scripts/inspect.js` renders frames at an
   arc or a time, draws the map with the late ink marked, and prints a
   chain's readings with their edge and facing flags.
+- **A crossbar is its own stroke (v0.22.0).** Autography's `J` was one
+  stroke: along the bar to the stem, down and round the loop, back along
+  the tail, *up the stem again* and out along the rest of the bar - the
+  walk found a second way up the stem through the junction's knot and
+  counted the climb as new ink, so no retrace penalty ever saw it. The
+  decomposition score now finds a climb on the path itself (a run that
+  rises over ink the same stroke wrote earlier, 0.03 em tolerance) and, if a
+  bar follows it - flat, short, in the upper part of the letter - charges
+  `W.barTrace` (6 per em) for the climb, as it does for running out along
+  a bar and back. A hand lifts for a crossbar; a `p` still climbs its stem
+  for the bowl. The `J` is now two strokes, the stem drawn from its top,
+  the bar deferred to the end; Pinyon's alphabet and pangram still pass
+  the join checks with no failures. Ms Madi (OFL, monoline connected
+  script) is bundled as a third face.
 - **Leftover ink joins the nearest path, not the nearest claimed pixel.**
   Ink no nib reached used to join whichever claimed pixel was nearest, which
   beside a wide claim is that claim whatever stroke the ink lies on. It now
@@ -1100,13 +1114,11 @@ script and is never edited by hand.
 
 ## Known rough edges
 
-- **Autography's `J`: the stem pokes above the bar, and the pen never goes
-  there.** The recovered path runs the bar out and back and turns down the
-  stem from inside the bar, so the overshoot above it has no pass of its own
-  and appears as the pen rounds the corner. That is a pen-order defect, not
-  a reveal one: the bar wants to be its own stroke and the stem to start at
-  its real top (the hand editor can set that per letter; a general rule for
-  crossbars is still open).
+- **Autography's `J`: the body stroke still begins on the left half of the
+  bar** and turns down the stem at the junction, with the right half of the
+  bar as the separate crossbar stroke - two pieces of bar. The whole bar as
+  one stroke and the stem from its very top would need the walk to start a
+  stroke at a junction, which it does only for pointed pens.
 - **Pinyon's `x`: a serrated edge on the first stroke where the second
   crosses it at a shallow angle**, from readings that alternately do and do
   not find background through the hollow between the two outlines. The
