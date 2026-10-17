@@ -1574,7 +1574,7 @@ el.exportmovie.addEventListener('click', async () => {
     try {
       ({ id } = await postJSON('/__movie/start', { fps: MOVIE.fps, codec }));
     } catch (err) {
-      throw new Error(`the dev server is not answering (${err.message}) - movie export needs \`npm run dev\`, restarted after this update`);
+      throw new Error(`movie export needs the local dev server on a Mac (\`npm run dev\`): the frames are encoded with AVFoundation, which the hosted site cannot do (${err.message})`);
     }
     const toPng = (canvas) => new Promise((ok, no) => canvas.toBlob((b) => (b ? ok(b) : no(new Error('frame encode failed'))), 'image/png'));
     const info = await animator.renderFrames(

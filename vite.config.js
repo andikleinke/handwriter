@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
 import movieExport from './scripts/movie-server.mjs';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // The built site is served from GitHub Pages under the repository's name
+  // (https://andikleinke.github.io/handwriter/); the dev server stays at /.
+  base: command === 'build' ? '/handwriter/' : '/',
   // Export movie: the page renders frames, the dev server encodes them with
   // AVFoundation into a .mov that keeps the alpha channel
   plugins: [movieExport()],
@@ -12,4 +15,4 @@ export default defineConfig({
   optimizeDeps: { exclude: ['harfbuzzjs'] },
   build: { target: 'esnext', assetsInlineLimit: 0 },
   assetsInclude: ['**/*.otf', '**/*.ttf'],
-});
+}));
