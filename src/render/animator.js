@@ -24,6 +24,7 @@ import { cumulativeLengths, pointAtLength } from '../lib/geometry.js';
 import { fontToRaster } from '../lib/raster.js';
 import { buildRevealMaps, HIDDEN, BLEND_EM, NIB_SLACK_PX } from './sweep.js';
 import { buildStrokeProgram, paintRibbon } from './strokeRender.js';
+import { fitProfiles, applyManualWidths } from './strokeFit.js';
 
 // Soft leading edge of the reveal, in raster px: enough to anti-alias the
 // front, never enough to show ink ahead of the nib.
@@ -63,7 +64,7 @@ export class Animator {
     this._strokes = [];
     // 'outline': the font's outline uncovered along the pen path (the reveal
     // maps + vector bands); 'stroke': the pen's ribbon is the letter
-    this.renderer = 'outline';
+    this.renderer = 'stroke';
   }
 
   get duration() {
@@ -85,6 +86,11 @@ export class Animator {
     this.layers = analysis.glyphs.map((g, gi) => makeLayer(this.maps.glyphs[gi], this.ink));
     this._bands = buildBands(this.maps, this.chains, analysis.glyphs);
     this._strokes = buildStrokeProgram(this.maps, this._upem(), analysis.glyphs.find((g) => g.raster)?.raster.scale);
+    // the profiles snapped to the outline (strokeFit.js); the unfitted
+    // program is kept for comparison
+    this._strokesRaw = buildStrokeProgram(this.maps, this._upem(), analysis.glyphs.find((g) => g.raster)?.raster.scale);
+    this.fit = fitProfiles(this._strokes, this.maps.sampled, this.chains, analysis.glyphs, this._upem());
+    this.fit.manual = applyManualWidths(this._strokes, this.maps.sampled, this.chains, analysis.glyphs, this._upem());
     this.rebuildTimeline(false);
     this.resize();
   }

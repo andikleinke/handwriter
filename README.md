@@ -14,7 +14,7 @@ dropped in through the font picker.
 The build's version is in the page title (`Stroke recovery prototype vX.Y.Z`,
 from `package.json`), so a screenshot or a recording names the build.
 
-## The stroke renderer (prototype, v0.27.0)
+## The stroke renderer (v0.27.0, the default since v0.28.0)
 
 *Renderer* in the player switches between two ways of drawing the same
 analysis:
@@ -22,7 +22,7 @@ analysis:
 - **outline reveal** (the engine described below): the font's outline,
   uncovered along the recovered pen path by the reveal maps and the vector
   bands;
-- **stroke (prototype)**: the pen's path *is* the letter. Each pen-down chain
+- **stroke** (the default): the pen's path *is* the letter. Each pen-down chain
   is one ribbon - the recovered centreline with its left and right profiles,
   the cross-sections after the junction and join rules, smoothed over 0.02 em
   and pulled in by the half-pixel a reading overshoots - filled to the pen
@@ -40,25 +40,46 @@ time-controlled parameter interval in a distance-field shader - not an
 outline it has to take apart. This prototype is the cheapest test of that
 order of operations with what we already recover.
 
+### Fitting the profiles against the outline (v0.28.0)
+
+The measured cross-sections are the starting point; the font's outline is
+the target. On load, `strokeFit.js` paints the union of all ribbons on the
+glyph's raster and, for every sample and side, moves the ribbon's edge half a
+raster pixel out where the point just past it is ink nobody covers, or in
+where the point just inside it is background. Twelve passes, the profiles
+smoothed over 0.015 em after each, a side allowed to grow at most 60 % past
+where it started (so a ribbon cannot swell into a neighbour's ink it happens
+to touch), bridges interpolated between their neighbours. Fitting changes
+widths only; the centreline is the recovered path, and ink the pen never
+travels (an untravelled tail, the `J`'s overshoot) stays missing.
+
+Hand-set widths come after the fit: with a point picked in the editor,
+**[** and **]** narrow or widen the stroke there by 5 % (**shift** 20 %),
+**\\** resets it. A set width is stored on the stroke record
+(`widthEdits`, full width in font units per point, remapped when points are
+deleted or the stroke is split) and blends into the fitted profile over
+0.04 em of path either way; the info line shows `width Nu ✎` on an edited
+point.
+
 Measured on 2026-10-18 at 1920 px (`scripts/inspect.js`: `silhouette()` =
 alpha-mask XOR against the font's outline, `continuity()` = over 40 frames,
 new ink must touch existing ink and no ink may vanish), on hello · he · o ·
-J · x · i:
+J · x · i, before and after the fit:
 
-| Face | XOR vs outline | detached new ink | vanished ink | change at completion |
-| --- | --- | --- | --- | --- |
-| Ms Madi (monoline) | 9–21 % (hello 11 %, J 9 %, o 21 %) | 0 | 0 | ≤ 49 px (the pen's last sample) |
-| Autography (monoline) | 8–16 % (hello 10 %, J 8 %, x 16 %) | 0 | 0 | ≤ 70 px |
-| Pinyon (shaded) | 12–24 % (hello 12 %, J 13 %, x 24 %) | 0 | 0 | ≤ 21 px |
+| Face | XOR, unfitted | XOR, fitted | detached new ink | vanished ink | change at completion |
+| --- | --- | --- | --- | --- | --- |
+| Ms Madi (monoline) | 9–21 % (hello 11, o 21) | 9–14 % (hello 9, o 14) | 0 | 0 | ≤ 49 px (the pen's last sample) |
+| Autography (monoline) | 8–16 % (hello 10, he 12, x 16) | 7–16 % (hello 8, he 9, x 16) | 0 | ≤ 2 px | ≤ 70 px |
+| Pinyon (shaded) | 12–24 % (hello 12, x 24) | 10–20 % (hello 10, x 20) | 0 | 0 | ≤ 21 px |
 
 Exported frames (`renderFrames`) and the preview are pixel-identical at the
-same time. The XOR is the price of the ribbon being the measured
-cross-section rather than the designed outline: about half of it is ink the
-pen never visits (untravelled tails and heads, the `J`'s overshoot) and the
-other half width error, largest where the font's stroke is not a swept nib
-(the `x`'s hairline, the `o`'s double pass). Refining the profiles against
-the outline per letter is the next step, not done yet; the recovered path and
-profiles are the authoring starting point.
+same time. The anti-aliased boundary alone accounts for roughly 5–8 % of
+XOR at this size, so the monoline faces are now within a few percent of the
+floor; what remains is ink the pen never visits and the strokes that are not
+a swept nib at all (the `x`'s hairline crossing in Autography and Pinyon,
+the `o`'s double pass). Those need the centreline refined, not the width:
+extending a chain's ends to the outline's tips and letting the editor pull
+curves, which it cannot yet.
 
 ## Hosted
 
@@ -872,6 +893,9 @@ Click any stroke — directly in the debug view or via its chip — then:
   the mouse is down and stays exactly where it is dropped
 - **click a point** of the selected stroke to pick it (the dashed ring); it
   is where **✂ split here** cuts and what **⌫ delete point** removes
+- **[ / ]** narrow or widen the stroke at the picked point by 5 % (shift:
+  20 %), **\\** resets it; the stroke renderer blends the width in over
+  0.04 em either side (v0.28.0)
 - **↶ undo / ↷ redo** (⌘Z, ⌘⇧Z; ⌃Z, ⌃⇧Z or ⌃Y) step through the last 50
   edits of the session, of any kind. Undoing back past a glyph's first edit
   drops its override, so the glyph goes back to being derived
@@ -1073,6 +1097,13 @@ research behind it stays in `docs/research-even-script.md`.
 
 ## Known rough edges
 
+- **The stroke renderer never draws ink the pen does not travel**: a tail or
+  head the skeleton pruned as a spur, the `J`'s overshoot past the bar. The
+  fit widens a ribbon, it cannot lengthen one. Extending a chain's ends to
+  the outline's tips is the open item.
+- **Hairlines the fit cannot reach**: Autography's and Pinyon's `x` keep a
+  16–20 % XOR because the crossing hairline is a different centreline from
+  the recovered one, and the editor moves points, not curves.
 - **Autography's `J`: the body stroke still begins on the left half of the
   bar** and turns down the stem at the junction, with the right half of the
   bar as the separate crossbar stroke - two pieces of bar. The whole bar as

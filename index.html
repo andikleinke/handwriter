@@ -71,11 +71,11 @@
             <span>Avg speed <b id="speedval">2.2</b> em/s</span>
             <input id="speed" type="range" min="0.3" max="4" step="0.1" value="2.2" />
           </label>
-          <label class="field" title="outline: the font's outline uncovered along the recovered pen path; stroke: the pen's ribbon itself is the letter (prototype)">
+          <label class="field" title="outline: the font's outline uncovered along the recovered pen path; stroke: the pen's ribbon itself is the letter, its profiles fitted to the outline">
             <span>Renderer</span>
             <select id="renderer">
-              <option value="outline">outline reveal</option>
-              <option value="stroke">stroke (prototype)</option>
+              <option value="stroke">stroke</option>
+              <option value="outline">outline reveal (previous engine)</option>
             </select>
           </label>
           <label class="check"><input type="checkbox" id="showpen" checked /> pen tip</label>
@@ -128,7 +128,7 @@
             >
             <span id="edithint" class="meta"
               >Click a stroke to edit it, then click one of its points to pick it. Drag a point to
-              reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point.
+              reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point; [ and ] make its width thinner or wider (⇧ by a fifth), \ gives it the ink's width back.
               ⌘Z / ⌘⇧Z undo and redo.</span
             >
           </div>

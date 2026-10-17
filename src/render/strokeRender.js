@@ -47,17 +47,24 @@ export function buildStrokeProgram(maps, upem, scale = 0.512) {
     };
     const hl = smooth(sc.halfL).map((v) => Math.max(0.5 / scale, v - bias));
     const hr = smooth(sc.halfR).map((v) => Math.max(0.5 / scale, v - bias));
-    const left = new Array(n), right = new Array(n), pts = new Array(n);
-    for (let k = 0; k < n; k++) {
-      const [x, y] = sc.pts[k];
-      const nx = -sc.tan[2 * k + 1], ny = sc.tan[2 * k]; // the left normal
-      pts[k] = [x, y];
-      left[k] = [x + nx * hl[k], y + ny * hl[k]];
-      right[k] = [x - nx * hr[k], y - ny * hr[k]];
-    }
-    out.push({ chain: ci, s: sc.s, pts, left, right, r0: (hl[0] + hr[0]) / 2, r1: (hl[n - 1] + hr[n - 1]) / 2 });
+    const rb = { chain: ci, s: sc.s, pts: sc.pts.map((p) => [p[0], p[1]]), tan: sc.tan, hl, hr, left: null, right: null, _cache: null };
+    rebuildEdges(rb);
+    out.push(rb);
   });
   return out;
+}
+
+/** The ribbon's left and right edges from its centreline and profiles. */
+export function rebuildEdges(rb) {
+  const n = rb.pts.length;
+  rb.left = new Array(n); rb.right = new Array(n);
+  for (let k = 0; k < n; k++) {
+    const [x, y] = rb.pts[k];
+    const nx = -rb.tan[2 * k + 1], ny = rb.tan[2 * k]; // the left normal
+    rb.left[k] = [x + nx * rb.hl[k], y + ny * rb.hl[k]];
+    rb.right[k] = [x - nx * rb.hr[k], y - ny * rb.hr[k]];
+  }
+  rb._cache = null;
 }
 
 const CHUNK = 24; // samples per cached piece of ribbon
@@ -72,7 +79,7 @@ const CHUNK = 24; // samples per cached piece of ribbon
  * under a nonzero fill, and the discs fill the outer wedge of every turn and
  * round the start and the front.
  */
-function piece(L, R, C, k0, k1) {
+export function piece(L, R, C, k0, k1) {
   const path = new Path2D();
   const tri = (a, b, c) => {
     const area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);

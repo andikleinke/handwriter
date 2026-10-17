@@ -21,8 +21,7 @@ import {
   dragPoint,
   deletePoint,
   snapStrokeRange,
-  refreshWidths,
-} from './lib/edit.js';
+  refreshWidths, setPointWidth } from './lib/edit.js';
 import { StrokeStore } from './lib/cache.js';
 import { RECORD_VERSION } from './lib/strokeRecovery.js';
 import { renderDebugView, hitTestStroke } from './render/debugView.js';
@@ -531,6 +530,7 @@ function run() {
         });
         window.__analysis = analysis; // handy from the console while tuning
         window.__fontCheck = () => checkAnalysis(analysis); // invariant report (src/lib/fontCheck.js)
+        window.__commitEdit = commitRecordEdit; // for scripts/inspect.js
         noteLoadedRecords();
         updateHistoryButtons();
         paintDebug();
@@ -716,7 +716,7 @@ function updateEditor() {
   );
   el.editlabel.textContent = `#${entry?.n} · ${g.chars?.trim() || g.name} · ${s.role} · ${Math.round(
     s.lengthFontUnits
-  )}u · ${s.points.length} points${selectedPoint != null ? ` · point ${selectedPoint + 1}` : ''}`;
+  )}u · ${s.points.length} points${selectedPoint != null ? ` · point ${selectedPoint + 1} · width ${s.widthEdits?.[selectedPoint] != null ? `${s.widthEdits[selectedPoint]}u ✎` : `${s.widths?.[selectedPoint] ?? '?'}u`}` : ''}`;
   const removable = selectedPoint != null && selectedPoint > 0 && selectedPoint < s.points.length - 1 && s.points.length > 3;
   el.deletePoint.disabled = !removable;
   el.deletePoint.title = selectedPoint == null
@@ -1092,6 +1092,16 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     removeSelectedPoint();
   }
+  // the width at the picked point: [ thinner, ] wider (shift: by a fifth), \ back to the ink's
+  if (selection && selectedPoint != null && (e.key === '[' || e.key === ']' || e.key === '\\')) {
+    e.preventDefault();
+    const g = analysis.glyphs[selection.glyphIndex];
+    const s = g.record.strokes[selection.strokeIndex];
+    const cur = s.widthEdits?.[selectedPoint] ?? s.widths?.[selectedPoint] ?? 20;
+    const f = e.key === '\\' ? null : e.key === ']' ? (e.shiftKey ? 1.25 : 1.05) : (e.shiftKey ? 0.8 : 0.95);
+    setPointWidth(g.record, selection.strokeIndex, selectedPoint, f === null ? null : cur * f);
+    commitRecordEdit(selection.glyphIndex);
+  }
 });
 
 el.moveEarlier.addEventListener('click', () => moveSelected(-1));
@@ -1251,7 +1261,7 @@ el.scrub.addEventListener('input', () => {
   setPlay('play');
 });
 
-el.renderer.value = (() => { try { return localStorage.getItem('handwriter.renderer') || 'outline'; } catch { return 'outline'; } })();
+el.renderer.value = (() => { try { return localStorage.getItem('handwriter.renderer') || 'stroke'; } catch { return 'stroke'; } })();
 animator.renderer = el.renderer.value;
 el.renderer.addEventListener('change', () => {
   try { localStorage.setItem('handwriter.renderer', el.renderer.value); } catch { /* private mode */ }

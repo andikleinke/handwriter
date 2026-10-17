@@ -23,6 +23,7 @@ export function splitStroke(record, strokeIndex, pointIndex) {
     ...s,
     points,
     widths: s.widths ? s.widths.slice(from, from + points.length) : undefined,
+    widthEdits: s.widthEdits ? remapWidthEdits(s.widthEdits, (i) => (i >= from && i < from + points.length ? i - from : null)) : undefined,
     lengthFontUnits: round2(polylineLength(points)),
   });
   const a = make(first, 0);
@@ -134,7 +135,25 @@ export function deletePoint(record, strokeIndex, pointIndex) {
   if (pointIndex <= 0 || pointIndex >= s.points.length - 1) return false;
   s.points.splice(pointIndex, 1);
   if (s.widths) s.widths.splice(pointIndex, 1);
+  if (s.widthEdits) s.widthEdits = remapWidthEdits(s.widthEdits, (i) => (i === pointIndex ? null : i > pointIndex ? i - 1 : i));
   s.lengthFontUnits = round2(polylineLength(s.points));
+  return true;
+}
+
+/** Hand-set widths follow their points through a split or a delete. */
+export function remapWidthEdits(edits, map) {
+  const out = {};
+  for (const [k, w] of Object.entries(edits)) { const j = map(Number(k)); if (j != null && j >= 0) out[j] = w; }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Set (or with `width` null, clear) the hand-set width at one point. */
+export function setPointWidth(record, strokeIndex, pointIndex, width) {
+  const s = record.strokes[strokeIndex];
+  if (!s || pointIndex < 0 || pointIndex >= s.points.length) return false;
+  const edits = { ...(s.widthEdits || {}) };
+  if (width == null) delete edits[pointIndex]; else edits[pointIndex] = round1(Math.max(1, width));
+  s.widthEdits = Object.keys(edits).length ? edits : undefined;
   return true;
 }
 
@@ -175,6 +194,8 @@ export function refreshWidths(glyph, record) {
   if (!raster) return false;
   for (const s of record.strokes) {
     s.widths = s.points.map((p) => round1(inkWidthAt(raster, fontToRaster(raster, p[0], p[1])) / raster.scale));
+    // a width the hand set by hand stays set
+    for (const [i, w] of Object.entries(s.widthEdits || {})) if (i < s.widths.length) s.widths[i] = w;
     delete s.againstRule;
   }
   return true;
