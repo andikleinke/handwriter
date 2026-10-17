@@ -647,6 +647,18 @@ glyph instead, and `src/render/animator.js` plays it:
   the bar deferred to the end; Pinyon's alphabet and pangram still pass
   the join checks with no failures. Ms Madi (OFL, monoline connected
   script) is bundled as a third face.
+- **A join is one band, under the letters, with the nib's round front
+  (v0.24.0).** The bridge between two letters was its own polygon with a
+  flat front, drawn over them, with widths read off samples that lie on no
+  ink: at Autography's `h`→`e` that was a bar meeting the `h`'s tail at an
+  angle with a notch at the corner and a step where the `e` began. Now a
+  bridge's band starts at the last cross-section of the letter it leaves and
+  ends at the first of the letter it reaches - the very same edge points the
+  letters' own bands use, so the three abut without a seam - its width runs
+  linearly from the one to the other, and it is painted before the letters,
+  so wherever it overlaps their ink the letter's own clipped band decides
+  the edge. Every band's front is now a half-disc of its current width, the
+  nib itself, instead of a flat cut.
 - **Leftover ink joins the nearest path, not the nearest claimed pixel.**
   Ink no nib reached used to join whichever claimed pixel was nearest, which
   beside a wide claim is that claim whatever stroke the ink lies on. It now

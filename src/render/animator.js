@@ -237,6 +237,21 @@ export class Animator {
     const prog = timeline.chains.map((c) => (T < c.t0 ? -Infinity : T >= c.t1 ? Infinity : arcAt(c, T)));
     const done = T >= timeline.total;
 
+    // the joins between letters first, under the letters: a bridge band is
+    // drawn as it is, with the planner's taper from one ink width to the
+    // other, and runs a few samples into each letter so the seam between it
+    // and the letter's own band lies inside ink the letter draws over
+    if (this._bands.bridges) {
+      if (!done) for (const band of this._bands.bridges) this._paintBand(band, prog[band.chain]);
+    } else {
+      for (const rb of this._ribbons) {
+        const p = prog[rb.chain];
+        const revealed = p === Infinity ? rb.L : p === -Infinity ? 0 : Math.min(rb.L, p - rb.s0);
+        if (revealed > 0) this._paintRibbon(rb, revealed);
+      }
+    }
+    if (done) for (const rb of this._ribbons) this._paintRibbon(rb, rb.L);
+
     analysis.glyphs.forEach((g, gi) => {
       const layer = this.layers[gi];
       const map = this.maps.glyphs[gi];
@@ -263,19 +278,6 @@ export class Animator {
       ctx.restore();
     });
 
-    // the joins between letters: bands too, unclipped, with the widths the
-    // junction rules gave them (an entry hairline stays a hairline into a
-    // shade); the older ribbons stay as the fallback when no map is built
-    if (this._bands.bridges) {
-      if (!done) for (const band of this._bands.bridges) this._paintBand(band, prog[band.chain]);
-    } else {
-      for (const rb of this._ribbons) {
-        const p = prog[rb.chain];
-        const revealed = p === Infinity ? rb.L : p === -Infinity ? 0 : Math.min(rb.L, p - rb.s0);
-        if (revealed > 0) this._paintRibbon(rb, revealed);
-      }
-    }
-    if (done) for (const rb of this._ribbons) this._paintRibbon(rb, rb.L);
 
     if (this.showPen && T < timeline.total) {
       const st = penState(timeline, T);
@@ -285,7 +287,7 @@ export class Animator {
 
   /**
    * One stroke's band, filled up to the chain's progress `p` (font units of
-   * arc) with a flat front at the pen. The band is the stroke's own
+   * arc) with the nib's round front at the pen. The band is the stroke's own
    * cross-section at every sample, as the reveal map measured it; on a free
    * edge it reaches a little past the ink and the outline clips it, on a side
    * facing another stroke it stops exactly at the width.
@@ -316,6 +318,12 @@ export class Animator {
     for (let k = m; k >= 0; k--) { const q = this._toCss(right[k]); ctx.lineTo(q[0], q[1]); }
     ctx.closePath();
     ctx.fill();
+    // the nib is round: the front is a half-disc on the current cross-section
+    if (p !== Infinity && p < s[n - 1]) {
+      const cx = (lc[0] + rc[0]) / 2, cy = (lc[1] + rc[1]) / 2;
+      const rad = Math.hypot(lc[0] - rc[0], lc[1] - rc[1]) / 2;
+      if (rad > 0.3) { ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.fill(); }
+    }
     ctx.restore();
   }
 
@@ -415,26 +423,49 @@ function buildBands(maps, chains, glyphs) {
   out.bridges = [];
   maps.sampled.forEach((sc, ci) => {
     const items = chains[ci].items;
+    const glyphOf = (k) => { const it = items[sc.item[k]]; return it.type === 'stroke' ? it.glyphIndex : -1; };
+    // a stroke's band lives in its glyph (and is clipped by its outline),
+    // with the measured cross-section a raster pixel wider on a free side;
+    // a bridge's is drawn as it is, so it carries no slack past the ink
+    const edges = (k, hl, hr) => {
+      const [x, y] = sc.pts[k];
+      const nx = -sc.tan[2 * k + 1], ny = sc.tan[2 * k]; // the left normal
+      return { l: [x + nx * hl, y + ny * hl], r: [x - nx * hr, y - ny * hr] };
+    };
+    const halves = (k, gi) => {
+      const slack = gi < 0 ? 0 : NIB_SLACK_PX / glyphs[gi].raster.scale;
+      return [sc.halfL[k] + (sc.facing[2 * k] ? 0 : slack), sc.halfR[k] + (sc.facing[2 * k + 1] ? 0 : slack)];
+    };
     let run = null;
     const close = () => {
       if (run && run.s.length >= 2) (run.glyph < 0 ? out.bridges : out[run.glyph]).push(run);
       run = null;
     };
+    const push = (k, hl, hr) => { const e = edges(k, hl, hr); run.s.push(sc.s[k]); run.left.push(e.l); run.right.push(e.r); };
     for (let k = 0; k < sc.n; k++) {
-      const it = items[sc.item[k]];
-      // a stroke's band lives in its glyph (and is clipped by its outline); a
-      // bridge's is drawn as it is, so it carries no slack past the ink
-      const gi = it.type === 'stroke' ? it.glyphIndex : -1;
+      const gi = glyphOf(k);
       if (gi >= 0 && !glyphs[gi]?.raster) { close(); continue; }
-      if (!run || run.glyph !== gi) { close(); run = { chain: ci, glyph: gi, s: [], left: [], right: [] }; }
-      const slack = gi < 0 ? 0 : NIB_SLACK_PX / glyphs[gi].raster.scale; // a raster pixel, in font units
-      const [x, y] = sc.pts[k];
-      const nx = -sc.tan[2 * k + 1], ny = sc.tan[2 * k]; // the left normal
-      const hl = sc.halfL[k] + (sc.facing[2 * k] ? 0 : slack);
-      const hr = sc.halfR[k] + (sc.facing[2 * k + 1] ? 0 : slack);
-      run.s.push(sc.s[k]);
-      run.left.push([x + nx * hl, y + ny * hl]);
-      run.right.push([x - nx * hr, y - ny * hr]);
+      if (run && run.glyph === gi) { push(k, ...halves(k, gi)); continue; }
+      close();
+      run = { chain: ci, glyph: gi, s: [], left: [], right: [] };
+      if (gi >= 0) { push(k, ...halves(k, gi)); continue; }
+      // A bridge: one polygon from the last sample of the letter it leaves to
+      // the first sample of the letter it reaches, sharing those two
+      // cross-sections with the letters' own bands so the three abut without
+      // a gap, and its width running linearly from the one to the other (a
+      // sample off the ink has no cross-section of its own to measure).
+      let e = k;
+      while (e + 1 < sc.n && glyphOf(e + 1) < 0) e++;
+      const a0 = k > 0 ? k - 1 : k, b0 = e + 1 < sc.n ? e + 1 : e;
+      const [l0, r0] = k > 0 ? halves(a0, glyphOf(a0)) : halves(k, -1);
+      const [l1, r1] = e + 1 < sc.n ? halves(b0, glyphOf(b0)) : halves(e, -1);
+      const s0 = sc.s[a0], s1 = sc.s[b0];
+      for (let j = a0; j <= b0; j++) {
+        const t = s1 > s0 ? (sc.s[j] - s0) / (s1 - s0) : 0;
+        push(j, l0 + (l1 - l0) * t, r0 + (r1 - r0) * t);
+      }
+      close();
+      k = e;
     }
     close();
   });
