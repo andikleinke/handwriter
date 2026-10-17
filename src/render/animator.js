@@ -20,6 +20,7 @@
 
 import { setupHiDPI, computeLayout, rasterPlacement } from './layout.js';
 import { buildTimeline, planChains, arcAt, penState, DEFAULT_SPEED_MODEL } from '../lib/timing.js';
+import { extendChainEnds } from '../lib/extendEnds.js';
 import { cumulativeLengths, pointAtLength } from '../lib/geometry.js';
 import { fontToRaster } from '../lib/raster.js';
 import { buildRevealMaps, HIDDEN, BLEND_EM, NIB_SLACK_PX } from './sweep.js';
@@ -80,6 +81,9 @@ export class Animator {
   load(analysis) {
     this.stop();
     this.analysis = analysis;
+    // free chain ends walked on to the ink's tips (extendEnds.js), before
+    // anything samples the paths
+    this.extended = extendChainEnds(analysis.plan, analysis.glyphs, this._upem());
     this.chains = planChains(analysis.plan);
     this.maps = buildRevealMaps(analysis, this.chains, this._upem());
     this._paths = analysis.glyphs.map((g) => (g.path ? new Path2D(g.path) : null));

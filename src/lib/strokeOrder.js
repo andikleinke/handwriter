@@ -1318,8 +1318,10 @@ export function orderStrokes(graph, ctx) {
       const n = graph.nodes[comp.nodeIds[0]];
       if (!n) continue;
       const r = Math.max(1, n.radius || 1);
+      // a short dab: the nib's round footprint is the dot, and a ribbon
+      // drawn along a longer path (it was ±0.5 r) overshoots it either end
       out.push({
-        pts: [[n.x - r * 0.5, n.y], [n.x + r * 0.5, n.y]],
+        pts: [[n.x - r * 0.2, n.y], [n.x + r * 0.2, n.y]],
         role: 'dot',
         comp: comp.id,
         turns: [],

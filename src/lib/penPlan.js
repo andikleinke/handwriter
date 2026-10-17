@@ -92,7 +92,7 @@ export function buildPenPlan(glyphs, opts = {}) {
       if (connect && prev) {
         const pointed = !!e.record?.stats?.hand?.pointed;
         if (pointed && prev.glyphIndex !== e.glyphIndex) tuckTail(prev, e, cfg);
-        bridge = tryBridge(prev, e, cfg, !pointed);
+        bridge = tryBridge(prev, e, cfg, !pointed, pointed);
         if (bridge) {
           bridge.chain = chain;
           bridge.word = wordIndex;
@@ -307,9 +307,10 @@ function tuckTail(prev, next, { maxGap }) {
  * pairs are scored on gap, agreement with the direction of travel, and how
  * much hairline is skipped or stem is retraced. Returns a bridge item and
  * records the cuts on both entries, or null when the strokes do not flow.
- * `allowMidEntry` is off for a pointed pen, which never writes up a stem.
+ * `allowMidEntry` is off for a pointed pen, which never writes up a stem;
+ * `allowHeadSkip` is on only for one, whose hairline head the tail replaces.
  */
-function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, minFlow }, allowMidEntry = true) {
+function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, minFlow }, allowMidEntry = true, allowHeadSkip = false) {
   const P = prev.full, Q = next.full;
   const pc = cumulativeLengths(P), qc = cumulativeLengths(Q);
   const b0 = prev.tailCut;
@@ -334,6 +335,24 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, minFlow }, all
     return t;
   };
 
+  // a trimmed tail is skipped ink unless the bridge runs over it: for any pen
+  // but a pointed one (whose trimmed hairline is replaced by the next letter)
+  // every trimmed point must lie under the bridge's ribbon
+  const halfW = 0.5 * (prev.stroke.endWidth || (prev.record?.penWidth || 40) * 0.4);
+  const covered = (i, ti, target, tj, d) => {
+    if (allowHeadSkip || i >= b0) return true;
+    const m = Math.max(d, 1);
+    const br = hermite(P[i], [ti[0] * m, ti[1] * m], target, [tj[0] * m, tj[1] * m], Math.max(3, Math.ceil(d / 6)));
+    for (let k = i + 1; k <= b0; k++) {
+      let best = Infinity;
+      for (let q = 1; q < br.length; q++) {
+        const dd = distToSegment(P[k][0], P[k][1], br[q - 1], br[q]);
+        if (dd < best) best = dd;
+      }
+      if (best > halfW) return false;
+    }
+    return true;
+  };
   const consider = (state, i, ti, trimP, target, arc, tj, midEntry, j, t) => {
     const dx = target[0] - P[i][0], dy = target[1] - P[i][1];
     const d = Math.hypot(dx, dy);
@@ -351,6 +370,7 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, minFlow }, all
     const headCost = midEntry ? 0.25 * trimWindow + 0.15 * (arc - trimWindow) : 0.25 * arc;
     const cost = 0.2 * d + 150 * (1 - flow) + 0.25 * trimP + headCost;
     if (state && cost >= state.cost) return state;
+    if (!covered(i, ti, target, tj, d)) return state;
     return { i, j, t, d, flow, cost, ti, tj, trimP, midEntry, target };
   };
 
@@ -361,6 +381,9 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, minFlow }, all
     for (let j = 0; j <= jMax; j++) {
       const midVertex = qc[j] > trimWindow;
       if (midVertex && !allowMidEntry) break; // only the hairline head is open
+      // a skipped head is skipped ink: only a pointed pen's hairline head,
+      // which the arriving tail stands in for, may be left out
+      if (!midVertex && j > 0 && !allowHeadSkip) continue;
       // the vertex itself
       best = consider(best, i, ti, trimP, Q[j], qc[j], entering(j), midVertex, j, 0);
       // and, for a mid-entry, the closest point along the segment after it -

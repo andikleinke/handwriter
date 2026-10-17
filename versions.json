@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.29.0",
+    "tag": "v0.29.0",
+    "date": "2026-10-18",
+    "note": "v0.29.0 — the pen travels every head and tail: no skipped ink at joins, chain ends walked to the ink's tips, dots are dabs"
+  },
+  {
     "version": "0.28.0",
     "tag": "v0.28.0",
     "date": "2026-10-18",
-    "note": "v0.28.0 — the stroke renderer is the default; its profiles are fitted to the outline and widths can be set by hand in the editor"
+    "note": "the stroke renderer is the default; its profiles are fitted to the outline and widths can be set by hand in the editor"
   },
   {
     "version": "0.27.0",

@@ -398,3 +398,106 @@ export async function suite(words) {
   for (const w of words) { await setText(w); out[w] = metrics(); }
   return out;
 }
+
+/**
+ * Ink of glyph `gi` that no ribbon covers, as blobs: size, bounding box
+ * (raster px), distance from the blob's farthest pixel to the nearest chain
+ * END (a pen-down or pen-up point) and to the nearest chain sample at all.
+ * A blob near an end is a tail the chain stops short of; one far from any
+ * end but near a sample is width error; one far from both is untravelled.
+ */
+export async function missing(gi = 0, minBlob = 8) {
+  const { fontToRaster } = await import('/src/lib/raster.js');
+  const { piece } = await import('/src/render/strokeRender.js');
+  const g = G()[gi], r = g.raster, W = r.width, H = r.height;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000';
+  const toR = (p) => fontToRaster(r, p[0] - g.x, p[1] - g.y);
+  const ends = [], samples = [];
+  for (const rb of A()._strokes) {
+    const L = rb.left.map(toR), R = rb.right.map(toR), C = rb.pts.map(toR);
+    ctx.fill(piece(L, R, C, 0, L.length - 1), 'nonzero');
+    ends.push({ ci: rb.chain, at: 'start', p: C[0], w: rb.hl[0] + rb.hr[0] }, { ci: rb.chain, at: 'end', p: C[C.length - 1], w: rb.hl[rb.hl.length - 1] + rb.hr[rb.hr.length - 1] });
+    for (let k = 0; k < C.length; k += 2) samples.push(C[k]);
+  }
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const fill = r.fill;
+  const miss = new Uint8Array(W * H);
+  let total = 0, missed = 0;
+  for (let i = 0; i < miss.length; i++) { if (fill[i]) { total++; if (d[i * 4 + 3] < 128) { miss[i] = 1; missed++; } } }
+  const seen = new Uint8Array(W * H), blobs = [];
+  for (let s0 = 0; s0 < miss.length; s0++) {
+    if (!miss[s0] || seen[s0]) continue;
+    const stack = [s0], blob = []; seen[s0] = 1;
+    while (stack.length) {
+      const p = stack.pop(); blob.push(p);
+      const px = p % W, py = (p / W) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = px + dx, ny = py + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const q = ny * W + nx;
+        if (miss[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+      }
+    }
+    if (blob.length < minBlob) continue;
+    let x0 = W, y0 = H, x1 = 0, y1 = 0;
+    for (const p of blob) { const px = p % W, py = (p / W) | 0; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
+    const near = (pts) => { let best = Infinity, who = -1; for (const p of blob) { const px = p % W, py = (p / W) | 0; for (let i = 0; i < pts.length; i++) { const q = pts[i].p || pts[i]; const dd = Math.hypot(q[0] - px, q[1] - py); if (dd < best) { best = dd; who = i; } } } return { d: best, i: who }; };
+    const e = near(ends), s = near(samples);
+    const far = (() => { let best = -1; for (const p of blob) { const px = p % W, py = (p / W) | 0; const q = ends[e.i].p; const dd = Math.hypot(q[0] - px, q[1] - py); if (dd > best) best = dd; } return best; })();
+    blobs.push({ px: blob.length, box: [x0, y0, x1, y1], end: ends[e.i] ? `${ends[e.i].ci}/${ends[e.i].at}` : null, endDist: +e.d.toFixed(1), endReach: +far.toFixed(1), endWidth: +(ends[e.i]?.w * r.scale).toFixed(1), sampleDist: +s.d.toFixed(1) });
+  }
+  blobs.sort((a, b) => b.px - a.px);
+  return { gi, total, missed, pct: +((100 * missed) / total).toFixed(1), blobs: blobs.slice(0, 12) };
+}
+
+/** Show glyph `gi`'s raster with the ribbons' union and the missed ink (red) in the page's corner. */
+export async function missingImage(gi = 0, Z = 2) {
+  const { fontToRaster } = await import('/src/lib/raster.js');
+  const { piece } = await import('/src/render/strokeRender.js');
+  const g = G()[gi], r = g.raster, W = r.width, H = r.height;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#000';
+  const toR = (p) => fontToRaster(r, p[0] - g.x, p[1] - g.y);
+  for (const rb of A()._strokes) ctx.fill(piece(rb.left.map(toR), rb.right.map(toR), rb.pts.map(toR), 0, rb.left.length - 1), 'nonzero');
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const img = ctx.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) {
+    const ink = r.fill[i], rib = d[i * 4 + 3] > 127;
+    let col = [245, 242, 236];
+    if (ink && rib) col = [60, 60, 60]; else if (ink) col = [220, 40, 40]; else if (rib) col = [40, 120, 220];
+    img.data.set([...col, 255], i * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+  let el = document.getElementById('__missing');
+  if (!el) { el = document.createElement('canvas'); el.id = '__missing'; el.style.cssText = 'position:fixed;left:0;top:0;z-index:9999;background:#fff'; document.body.appendChild(el); }
+  el.width = W * Z; el.height = H * Z; el.style.width = `${W * Z}px`; el.style.height = `${H * Z}px`;
+  const e = el.getContext('2d'); e.imageSmoothingEnabled = false; e.drawImage(c, 0, 0, W * Z, H * Z);
+  return { W, H, Z };
+}
+export function hideMissing() { document.getElementById('__missing')?.remove(); }
+
+/** One frame at fraction `frac` of the timeline as a PNG data URL (for saving outside the page). */
+export function framePNG(frac = 1, width = 900, renderer = A().renderer, box = null) {
+  const a = A();
+  const saved = a.renderer; a.renderer = renderer;
+  const { frames, W, H } = renderAt([frac * a.timeline.total], width);
+  a.renderer = saved; a.drawAt(a.time);
+  if (!box) return frames[0].toDataURL('image/png');
+  // box = [x0, y0, x1, y1] as fractions of the frame
+  const x0 = Math.floor(box[0] * W), y0 = Math.floor(box[1] * H), w = Math.ceil((box[2] - box[0]) * W), h = Math.ceil((box[3] - box[1]) * H);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(frames[0], x0, y0, w, h, 0, 0, w, h);
+  return c.toDataURL('image/png');
+}
+
+/** The missing-ink overlay of glyph `gi` (see missingImage) as a PNG data URL. */
+export async function missingPNG(gi = 0, Z = 2) {
+  await missingImage(gi, Z);
+  const el = document.getElementById('__missing');
+  const url = el.toDataURL('image/png');
+  hideMissing();
+  return url;
+}

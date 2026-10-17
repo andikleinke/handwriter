@@ -14,7 +14,7 @@ dropped in through the font picker.
 The build's version is in the page title (`Stroke recovery prototype vX.Y.Z`,
 from `package.json`), so a screenshot or a recording names the build.
 
-## The stroke renderer (v0.27.0, the default since v0.28.0)
+## The stroke renderer (v0.27.0, the default since v0.28.0, ends and joins v0.29.0)
 
 *Renderer* in the player switches between two ways of drawing the same
 analysis:
@@ -61,25 +61,50 @@ deleted or the stroke is split) and blends into the fitted profile over
 0.04 em of path either way; the info line shows `width Nu ✎` on an edited
 point.
 
-Measured on 2026-10-18 at 1920 px (`scripts/inspect.js`: `silhouette()` =
-alpha-mask XOR against the font's outline, `continuity()` = over 40 frames,
-new ink must touch existing ink and no ink may vanish), on hello · he · o ·
-J · x · i, before and after the fit:
+### Ends and joins the pen must travel (v0.29.0)
 
-| Face | XOR, unfitted | XOR, fitted | detached new ink | vanished ink | change at completion |
-| --- | --- | --- | --- | --- | --- |
-| Ms Madi (monoline) | 9–21 % (hello 11, o 21) | 9–14 % (hello 9, o 14) | 0 | 0 | ≤ 49 px (the pen's last sample) |
-| Autography (monoline) | 8–16 % (hello 10, he 12, x 16) | 7–16 % (hello 8, he 9, x 16) | 0 | ≤ 2 px | ≤ 70 px |
-| Pinyon (shaded) | 12–24 % (hello 12, x 24) | 10–20 % (hello 10, x 20) | 0 | 0 | ≤ 21 px |
+A census of the ink no ribbon covered (`missing()` in `scripts/inspect.js`:
+the uncovered blobs of a glyph's raster, each with its distance to the
+nearest pen-down or pen-up) found two causes, neither of them width:
+
+- **Skipped heads and tails at joins.** The bridge planner could land up to
+  0.22 em into the next stroke and leave the head out, or leave the previous
+  stroke early and drop its tail; the outline reveal hid that ink under the
+  join, the ribbon never drew it, and Ms Madi's `x` after a `J` lost a leg
+  (13 % of its ink). Now only a pointed pen may skip a head, and only a
+  hairline one the arriving tail stands in for; for every other pen a
+  trimmed tail must lie under the bridge's ribbon, or the candidate is
+  rejected. Where no landing satisfies that, the pen lifts, which is honest
+  (`J`→`x` in Ms Madi and Autography now lifts).
+- **Chain ends short of the tip.** A thinned skeleton stops about half a
+  width short of a rounded end. `extendEnds.js` walks every free chain end
+  on along its tangent, a raster pixel at a time, re-centred on the ink's
+  cross-section, until the ink ends, widens by more than a third, or runs
+  into another stroke (at most 0.12 em). The plan item's path is lengthened
+  before anything samples it, so the reveal maps, the timing, the pen tip
+  and both renderers see one path. A dot is exempt: its stroke is now a
+  short dab (±0.2 r) so the nib's round footprint is the dot.
+
+Measured on 2026-10-18 at 1920 px (`scripts/inspect.js`: `silhouette()` =
+alpha-mask XOR against the font's outline, split into ink the ribbon
+misses and ink it adds; `continuity()` = over 40 frames, new ink must touch
+existing ink and no ink may vanish), on hello · he · o · J · x · i:
+
+| Face | XOR, unfitted (v0.27) | XOR now | of which missing | of which extra | detached new ink | vanished ink | change at completion |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Ms Madi (monoline) | 9–21 % | 8.6–13.3 % (hello 8.9, J 8.6, o 13.3) | 1.8–4.5 % | 6–10 % | 0 | 0 | ≤ 29 px |
+| Autography (monoline) | 8–16 % | 7.2–14.1 % (hello 8.6, J 7.2, x 14.1) | 1.5–5.4 % | 6–9 % | 0 | ≤ 2 px | ≤ 49 px |
+| Pinyon (shaded) | 12–24 % | 9.3–18.2 % (hello 9.3, J 10.0, x 18.2) | 3–10 % | 6–9 % | 0 | ≤ 2 px | ≤ 12 px |
 
 Exported frames (`renderFrames`) and the preview are pixel-identical at the
-same time. The anti-aliased boundary alone accounts for roughly 5–8 % of
-XOR at this size, so the monoline faces are now within a few percent of the
-floor; what remains is ink the pen never visits and the strokes that are not
-a swept nib at all (the `x`'s hairline crossing in Autography and Pinyon,
-the `o`'s double pass). Those need the centreline refined, not the width:
-extending a chain's ends to the outline's tips and letting the editor pull
-curves, which it cannot yet.
+same time. The missing share is now one to five percent of the ink on the
+monoline faces; what is left of it is the inside corner where two passes
+of one chain merge at a shallow angle (the `o`'s entry meeting its bowl),
+which the outline fills and a round nib does not, and the `x`'s crossing
+hairline in Pinyon and Autography, which runs on a different centreline
+than the recovered one. The extra share, six to ten percent, is the
+anti-aliased boundary of a ribbon drawn a half-pixel generous at this size,
+plus the round caps where the font's tips are flatter.
 
 ## Hosted
 
@@ -1097,13 +1122,12 @@ research behind it stays in `docs/research-even-script.md`.
 
 ## Known rough edges
 
-- **The stroke renderer never draws ink the pen does not travel**: a tail or
-  head the skeleton pruned as a spur, the `J`'s overshoot past the bar. The
-  fit widens a ribbon, it cannot lengthen one. Extending a chain's ends to
-  the outline's tips is the open item.
+- **Inside corners where two passes of one chain merge** (the `o`'s entry
+  meeting its bowl) are filled by the outline and left as a small wedge by
+  the ribbon, as a round nib would leave them. Deliberately not patched.
 - **Hairlines the fit cannot reach**: Autography's and Pinyon's `x` keep a
-  16–20 % XOR because the crossing hairline is a different centreline from
-  the recovered one, and the editor moves points, not curves.
+  14–18 % XOR because the crossing hairline is a different centreline from
+  the recovered one.
 - **Autography's `J`: the body stroke still begins on the left half of the
   bar** and turns down the stem at the junction, with the right half of the
   bar as the separate crossbar stroke - two pieces of bar. The whole bar as
