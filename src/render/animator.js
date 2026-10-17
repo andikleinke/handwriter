@@ -23,6 +23,7 @@ import { buildTimeline, planChains, arcAt, penState, DEFAULT_SPEED_MODEL } from 
 import { cumulativeLengths, pointAtLength } from '../lib/geometry.js';
 import { fontToRaster } from '../lib/raster.js';
 import { buildRevealMaps, HIDDEN, BLEND_EM, NIB_SLACK_PX } from './sweep.js';
+import { buildStrokeProgram, paintRibbon } from './strokeRender.js';
 
 // Soft leading edge of the reveal, in raster px: enough to anti-alias the
 // front, never enough to show ink ahead of the nib.
@@ -59,6 +60,10 @@ export class Animator {
     this._paths = [];
     this._ribbons = [];
     this._bands = [];
+    this._strokes = [];
+    // 'outline': the font's outline uncovered along the pen path (the reveal
+    // maps + vector bands); 'stroke': the pen's ribbon is the letter
+    this.renderer = 'outline';
   }
 
   get duration() {
@@ -79,6 +84,7 @@ export class Animator {
     this._paths = analysis.glyphs.map((g) => (g.path ? new Path2D(g.path) : null));
     this.layers = analysis.glyphs.map((g, gi) => makeLayer(this.maps.glyphs[gi], this.ink));
     this._bands = buildBands(this.maps, this.chains, analysis.glyphs);
+    this._strokes = buildStrokeProgram(this.maps, this._upem(), analysis.glyphs.find((g) => g.raster)?.raster.scale);
     this.rebuildTimeline(false);
     this.resize();
   }
@@ -239,6 +245,19 @@ export class Animator {
     // how far along each chain the nib is, in font units
     const prog = timeline.chains.map((c) => (T < c.t0 ? -Infinity : T >= c.t1 ? Infinity : arcAt(c, T)));
     const done = T >= timeline.total;
+
+    if (this.renderer === 'stroke') {
+      // the stroke renderer: each chain's ribbon filled to the pen, in pen
+      // order, later ink over earlier; the finished frame is full progress
+      const toCss = (q) => this._toCss(q);
+      const key = `${layout.originX},${layout.baselineY},${layout.s}`;
+      for (const rb of this._strokes) paintRibbon(ctx, rb, prog[rb.chain], toCss, this.ink, key);
+      if (this.showPen && T < timeline.total) {
+        const st = penState(timeline, T);
+        if (st) this._drawPen(this._toCss(st.at), st.kind === 'up');
+      }
+      return;
+    }
 
     // 1. the raster maps, clipped by the outlines: what the bands below do
     // not cover (leftover ink, the chain ends' discs)

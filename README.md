@@ -14,6 +14,52 @@ dropped in through the font picker.
 The build's version is in the page title (`Stroke recovery prototype vX.Y.Z`,
 from `package.json`), so a screenshot or a recording names the build.
 
+## The stroke renderer (prototype, v0.27.0)
+
+*Renderer* in the player switches between two ways of drawing the same
+analysis:
+
+- **outline reveal** (the engine described below): the font's outline,
+  uncovered along the recovered pen path by the reveal maps and the vector
+  bands;
+- **stroke (prototype)**: the pen's path *is* the letter. Each pen-down chain
+  is one ribbon - the recovered centreline with its left and right profiles,
+  the cross-sections after the junction and join rules, smoothed over 0.02 em
+  and pulled in by the half-pixel a reading overshoots - filled to the pen
+  with the nib's round footprint at either end. No outline is uncovered, no
+  pixel is owned, nothing is clipped: a later pass paints over an earlier one,
+  and the finished frame is the same renderer at full progress. The ribbon is
+  filled as consistently wound triangles plus a disc per sample (a single
+  edge polygon folded over itself on a tight hook and punched a hole), cached
+  as Path2D chunks per layout (0.15 ms a frame for "hello Kleinke").
+
+Built after an outside review of the junction problem (docs/AUDIT-2026-10-17.md
+and the reviewer's answer): what Apple's welcome animation starts from is
+stroke data - cubic segments with a radius per control point, revealed by a
+time-controlled parameter interval in a distance-field shader - not an
+outline it has to take apart. This prototype is the cheapest test of that
+order of operations with what we already recover.
+
+Measured on 2026-10-18 at 1920 px (`scripts/inspect.js`: `silhouette()` =
+alpha-mask XOR against the font's outline, `continuity()` = over 40 frames,
+new ink must touch existing ink and no ink may vanish), on hello · he · o ·
+J · x · i:
+
+| Face | XOR vs outline | detached new ink | vanished ink | change at completion |
+| --- | --- | --- | --- | --- |
+| Ms Madi (monoline) | 9–21 % (hello 11 %, J 9 %, o 21 %) | 0 | 0 | ≤ 49 px (the pen's last sample) |
+| Autography (monoline) | 8–16 % (hello 10 %, J 8 %, x 16 %) | 0 | 0 | ≤ 70 px |
+| Pinyon (shaded) | 12–24 % (hello 12 %, J 13 %, x 24 %) | 0 | 0 | ≤ 21 px |
+
+Exported frames (`renderFrames`) and the preview are pixel-identical at the
+same time. The XOR is the price of the ribbon being the measured
+cross-section rather than the designed outline: about half of it is ink the
+pen never visits (untravelled tails and heads, the `J`'s overshoot) and the
+other half width error, largest where the font's stroke is not a swept nib
+(the `x`'s hairline, the `o`'s double pass). Refining the profiles against
+the outline per letter is the next step, not done yet; the recovered path and
+profiles are the authoring starting point.
+
 ## Hosted
 
 The built site is published at <https://andikleinke.github.io/handwriter/>

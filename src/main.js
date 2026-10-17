@@ -87,6 +87,7 @@ const el = {
   speedval: $('speedval'),
   scrub: $('scrub'),
   showpen: $('showpen'),
+  renderer: $('renderer'),
   loop: $('loop'),
   log: $('log'),
   logcount: $('logcount'),
@@ -1250,6 +1251,13 @@ el.scrub.addEventListener('input', () => {
   setPlay('play');
 });
 
+el.renderer.value = (() => { try { return localStorage.getItem('handwriter.renderer') || 'outline'; } catch { return 'outline'; } })();
+animator.renderer = el.renderer.value;
+el.renderer.addEventListener('change', () => {
+  try { localStorage.setItem('handwriter.renderer', el.renderer.value); } catch { /* private mode */ }
+  animator.renderer = el.renderer.value;
+  animator.drawAt(animator.time);
+});
 el.showpen.addEventListener('change', () => {
   animator.showPen = el.showpen.checked;
   animator.drawAt(animator.time);

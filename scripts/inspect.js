@@ -119,6 +119,116 @@ export async function atTime(fracs, box = [0, 0, 1, 1], width = 1600) {
   return { total };
 }
 
+/**
+ * The stroke renderer's finished silhouette against the font's outline, as
+ * alpha masks at `width` px: XOR, missing and extra as fractions of the
+ * outline's ink. Also checks that the last animated frame equals the finished
+ * frame (no geometry change at completion) for the renderer given.
+ */
+export function silhouette(width = 1920, renderer = 'stroke') {
+  const a = A();
+  const saved = a.renderer;
+  const mask = (mode, T) => {
+    a.renderer = mode;
+    const { frames, W, H } = renderAt([T], width);
+    const d = frames[0].getContext('2d').getImageData(0, 0, W, H).data;
+    const m = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) m[i] = d[i * 4 + 3] > 127 ? 1 : 0;
+    return { m, W, H };
+  };
+  const total = a.timeline.total;
+  const target = mask('outline', total);           // the font's outline, complete
+  const got = mask(renderer, total);               // the renderer, finished
+  const last = mask(renderer, total - 1e-4);       // the last animated frame
+  a.renderer = saved; a.drawAt(a.time);
+  let ink = 0, xor = 0, missing = 0, extra = 0, swap = 0;
+  for (let i = 0; i < target.m.length; i++) {
+    if (target.m[i]) ink++;
+    if (target.m[i] !== got.m[i]) { xor++; if (target.m[i]) missing++; else extra++; }
+    if (got.m[i] !== last.m[i]) swap++;
+  }
+  return { ink, xor: +(xor / ink).toFixed(4), missing: +(missing / ink).toFixed(4), extra: +(extra / ink).toFixed(4), completionChange: swap };
+}
+
+/**
+ * Continuity of a run of `steps` frames for the given renderer: ink that
+ * appears in a frame must touch ink that was already there (within `reach`
+ * px) unless a chain starts in that step, and ink must never vanish. Returns
+ * the counts of detached new pixels and vanished pixels, with the worst
+ * frames, so a clean run reads detached 0, vanished ~0.
+ */
+export function continuity(steps = 40, width = 960, renderer = A().renderer, reach = 3) {
+  const a = A();
+  const saved = a.renderer; a.renderer = renderer;
+  const total = a.timeline.total;
+  const times = []; for (let i = 0; i <= steps; i++) times.push((i / steps) * total);
+  const { frames, W, H } = renderAt(times, width);
+  a.renderer = saved; a.drawAt(a.time);
+  const masks = frames.map((c) => { const d = c.getContext('2d').getImageData(0, 0, W, H).data; const m = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) m[i] = d[i * 4 + 3] > 127 ? 1 : 0; return m; });
+  const starts = (f) => a.timeline.chains.some((c) => c.t0 > times[f - 1] && c.t0 <= times[f]);
+  let detached = 0, vanished = 0; const worst = [];
+  for (let f = 1; f < masks.length; f++) {
+    const prev = masks[f - 1], cur = masks[f];
+    let n = 0, v = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (prev[i] && !cur[i]) v++;
+      if (!cur[i] || prev[i]) continue;
+      // new ink: does anything within `reach` belong to the previous frame
+      // or to new ink that does (flood through the new ink from old ink)?
+      n++;
+    }
+    // connected-component test: new pixels reachable from old ink
+    if (n) {
+      const seen = new Uint8Array(W * H); const q = [];
+      for (let i = 0; i < W * H; i++) if (!cur[i] || prev[i]) continue; else {
+        // seed: new pixels adjacent (within reach) to old ink
+        const px = i % W, py = (i - px) / W; let near = false;
+        for (let dy = -reach; dy <= reach && !near; dy++) for (let dx = -reach; dx <= reach; dx++) { const x = px + dx, y = py + dy; if (x < 0 || y < 0 || x >= W || y >= H) continue; if (prev[y * W + x]) { near = true; break; } }
+        if (near) { seen[i] = 1; q.push(i); }
+      }
+      while (q.length) { const i = q.pop(); const px = i % W, py = (i - px) / W; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = px + dx, y = py + dy; if (x < 0 || y < 0 || x >= W || y >= H) continue; const j = y * W + x; if (cur[j] && !prev[j] && !seen[j]) { seen[j] = 1; q.push(j); } } }
+      let det = 0; for (let i = 0; i < W * H; i++) if (cur[i] && !prev[i] && !seen[i]) det++;
+      if (det && !starts(f)) { detached += det; worst.push([f, det]); }
+    }
+    vanished += v;
+  }
+  return { steps, detached, vanished, worstFrames: worst.sort((p, q) => q[1] - p[1]).slice(0, 5) };
+}
+
+/**
+ * Two consecutive frames of a run (of `steps`), shown as: frame f in grey,
+ * ink new in frame f over f-1 in red, ink that vanished in blue; the view is
+ * cropped to the changes and magnified.
+ */
+export async function diffFrames(f, steps = 40, width = 960, renderer = A().renderer) {
+  const a = A();
+  const saved = a.renderer; a.renderer = renderer;
+  const total = a.timeline.total;
+  const { frames, W, H } = renderAt([((f - 1) / steps) * total, (f / steps) * total], width);
+  a.renderer = saved; a.drawAt(a.time);
+  const d0 = frames[0].getContext('2d').getImageData(0, 0, W, H).data, d1 = frames[1].getContext('2d').getImageData(0, 0, W, H).data;
+  const out = document.createElement('canvas'); out.width = W; out.height = H;
+  const o = out.getContext('2d'); const img = o.createImageData(W, H); const d = img.data;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0, added = 0, gone = 0;
+  for (let i = 0; i < W * H; i++) {
+    const was = d0[i * 4 + 3] > 127, is = d1[i * 4 + 3] > 127;
+    let r = 243, g = 239, b = 230;
+    if (is && was) { r = g = b = 120; }
+    else if (is) { r = 224; g = 30; b = 40; added++; }
+    else if (was) { r = 30; g = 80; b = 220; gone++; }
+    if (is !== was) { const px = i % W, py = (i - px) / W; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
+    d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255;
+  }
+  o.putImageData(img, 0, 0);
+  if (x1 < x0) { show(out); return { added, gone }; }
+  const pad = 20; x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad);
+  const Z = Math.max(1, Math.min(4, Math.floor(960 / (x1 - x0 + 1))));
+  const crop = document.createElement('canvas'); crop.width = (x1 - x0 + 1) * Z; crop.height = (y1 - y0 + 1) * Z;
+  const c = crop.getContext('2d'); c.imageSmoothingEnabled = false; c.drawImage(out, x0, y0, x1 - x0 + 1, y1 - y0 + 1, 0, 0, crop.width, crop.height);
+  show(crop);
+  return { added, gone, box: [x0, y0, x1, y1], Z };
+}
+
 /** The frame box (fractions) that shows raster pixels x0..x1, y0..y1 of glyph gi at the given render width. */
 export function boxOfRaster(x0, y0, x1, y1, width = 2400, gi = 0) {
   const a = A();

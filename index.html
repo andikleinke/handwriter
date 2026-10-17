@@ -71,6 +71,13 @@
             <span>Avg speed <b id="speedval">2.2</b> em/s</span>
             <input id="speed" type="range" min="0.3" max="4" step="0.1" value="2.2" />
           </label>
+          <label class="field" title="outline: the font's outline uncovered along the recovered pen path; stroke: the pen's ribbon itself is the letter (prototype)">
+            <span>Renderer</span>
+            <select id="renderer">
+              <option value="outline">outline reveal</option>
+              <option value="stroke">stroke (prototype)</option>
+            </select>
+          </label>
           <label class="check"><input type="checkbox" id="showpen" checked /> pen tip</label>
           <label class="check" title="curvature-dependent speed with ease in/out, instead of constant speed"
             ><input type="checkbox" id="natural" checked /> natural speed</label

@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.27.0",
+    "tag": "v0.27.0",
+    "date": "2026-10-18",
+    "note": "v0.27.0 — stroke renderer prototype: the pen's ribbon is the letter, switchable beside the outline reveal"
+  },
+  {
     "version": "0.26.0",
     "tag": "v0.26.0",
     "date": "2026-10-17",
