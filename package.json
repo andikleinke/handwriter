@@ -1,6 +1,6 @@
 {
   "name": "handwriter-stroke-recovery",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "Prototype: recovering pen strokes and centrelines from a static cursive font",
   "scripts": {
     "dev": "vite",

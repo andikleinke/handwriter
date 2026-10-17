@@ -58,7 +58,8 @@ export function buildRevealMaps(analysis, chains, upem) {
   if (!Number.isFinite(scaleMin)) return { glyphs: [], unassigned: 0 };
   const step = 1 / scaleMin; // one raster pixel, in font units
   const sampled = chains.map((c) => sampleChain(c, step, glyphs, upem));
-  capWidthsAtJunctions(sampled, step, upem, glyphs);
+  capWidthsAtJunctions(sampled, step, upem, glyphs, chains);
+  joinWidths(sampled, chains);
   const out = [];
   let unassigned = 0;
   glyphs.forEach((g, gi) => {
@@ -201,7 +202,8 @@ function sampleChain(chain, step, glyphs, upem) {
  * and do not count. The reach is generous - half as much again as the two
  * half-widths - because edges merge well before centrelines meet.
  */
-function capWidthsAtJunctions(sampled, step, upem, glyphs) {
+function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
+  const items = (sc, k) => chains[sampled.indexOf(sc)]?.items[sc.item[k]]?.type;
   const margin = 2 * step;
   const minGap = 0.12 * upem;
   let cell = margin;
@@ -323,7 +325,11 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
       while (e + 1 < sc.n && junction[e + 1]) e++;
       const legs = [];
       let start = k, hairpin = false;
-      for (let i = k + turn; i <= e; i++) {
+      for (let i = k + 1; i <= e; i++) {
+        // a new plan item (a bridge, or the stroke it lands on) is a new leg
+        // with nothing carried over: the letter's entry has its own width
+        if (sc.item[i] !== sc.item[i - 1]) { legs.push([start, i - 1, hairpin]); start = i; hairpin = true; continue; }
+        if (i < k + turn || i - turn < start) continue;
         const dot = sc.tan[2 * i] * sc.tan[2 * (i - turn)] + sc.tan[2 * i + 1] * sc.tan[2 * (i - turn) + 1];
         if (dot >= 0.5) continue;
         const cut = i - (turn >> 1);
@@ -464,8 +470,12 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
               v = Math.max(floor, other || !atEdge ? own - EDGE_BIAS_PX * step : Math.max(read, own));
             } else if (other || !atEdge) {
               // deep in a retrace or a merge, with nothing clean to hold to: the
-              // reading, smoothed, and never less than the nib's own radius
-              v = Math.max(sc.R[i], medianOf(side, i, a, b));
+              // reading, smoothed, and never less than the nib's own radius -
+              // except at a letter's entry from a bridge, where the radius is
+              // the merged ink's (an `e`'s entry runs along its own eye) and
+              // the readings that do reach background are the stroke's width
+              const entry = a > 0 && sc.item[a] !== sc.item[a - 1] && items(sc, a) === 'stroke';
+              v = entry ? (medianOf(side, i, a, b, true) ?? medianOf(side, i, a, b)) : Math.max(sc.R[i], medianOf(side, i, a, b));
             } else {
               v = read; // this stroke's own edge, however wide
             }
@@ -486,6 +496,32 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs) {
             facing[2 * i + side] = 1;
           }
         });
+      }
+      k = e + 1;
+    }
+  });
+}
+
+/**
+ * A bridge's samples lie on no ink of their own: their width runs linearly
+ * from the last cross-section of the stroke the pen leaves to the first of
+ * the stroke it lands on, so the join is one taper and not three pieces.
+ */
+function joinWidths(sampled, chains) {
+  sampled.forEach((sc, ci) => {
+    const items = chains[ci].items;
+    let k = 0;
+    while (k < sc.n) {
+      if (items[sc.item[k]].type !== 'bridge') { k++; continue; }
+      let e = k;
+      while (e + 1 < sc.n && sc.item[e + 1] === sc.item[k]) e++;
+      const a0 = k > 0 ? k - 1 : k, b0 = e + 1 < sc.n ? e + 1 : e;
+      const s0 = sc.s[a0], s1 = sc.s[b0];
+      for (let i = k; i <= e; i++) {
+        const t = s1 > s0 ? (sc.s[i] - s0) / (s1 - s0) : 0;
+        sc.halfL[i] = sc.halfL[a0] + (sc.halfL[b0] - sc.halfL[a0]) * t;
+        sc.halfR[i] = sc.halfR[a0] + (sc.halfR[b0] - sc.halfR[a0]) * t;
+        sc.facing[2 * i] = sc.facing[2 * i + 1] = 0;
       }
       k = e + 1;
     }

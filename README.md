@@ -659,6 +659,18 @@ glyph instead, and `src/render/animator.js` plays it:
   so wherever it overlaps their ink the letter's own clipped band decides
   the edge. Every band's front is now a half-disc of its current width, the
   nib itself, instead of a flat cut.
+- **Through a join the width runs from one letter's clean width to the
+  other's (v0.25.0).** The join still read as three pieces because the
+  width readings at a stroke's end are of the merged ink: Autography's `e`
+  enters along the bottom of its own eye, so its entry read 18 px where the
+  stroke itself is 15, and the junction rules held the `h`'s width into it
+  as if it were a crossing. Now every plan item starts a junction leg of its
+  own - nothing is carried from the `h` through the bridge into the `e` -
+  a letter's entry takes its width from the readings that reach background
+  (smoothed), without the nib-radius floor that reads the merged ink, and a
+  bridge's samples run linearly from the last cross-section of the stroke
+  the pen leaves to the first of the one it lands on. On `he` the profile
+  through the join is a straight 19 → 15 px taper.
 - **Leftover ink joins the nearest path, not the nearest claimed pixel.**
   Ink no nib reached used to join whichever claimed pixel was nearest, which
   beside a wide claim is that claim whatever stroke the ink lies on. It now
