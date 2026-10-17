@@ -4,8 +4,9 @@
 #
 #   npm run deploy
 #
-# (An Actions workflow would do this on every push, but pushing one needs a
-# token with the `workflow` scope: `gh auth refresh -h github.com -s workflow`.)
+# Normally unnecessary: .github/workflows/pages.yml builds and deploys the
+# site on every push to main. This is the manual fallback (it publishes to the
+# gh-pages branch; switch Pages back to that branch to use it).
 set -e
 cd "$(dirname "$0")/.."
 npm run build
