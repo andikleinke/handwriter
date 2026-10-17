@@ -1,3 +1,5 @@
+> **Retired (2026-10-17):** this plan concerned the pen model, which was removed in v0.23.0 (last present in tag v0.22.0). Kept for the record.
+
 # Milestone 4 plan: fitting a pen-model hand to a font
 
 Status (v0.10.0): implemented as planned in src/pen/fit.js, src/lib/handStore.js

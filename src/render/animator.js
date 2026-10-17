@@ -24,9 +24,6 @@ import { cumulativeLengths, pointAtLength } from '../lib/geometry.js';
 import { fontToRaster } from '../lib/raster.js';
 import { buildRevealMaps, HIDDEN, BLEND_EM, NIB_SLACK_PX } from './sweep.js';
 
-// The pen model's native tempo maps to this slider value; the slider scales it.
-const PEN_NOMINAL_SPEED = 2.2;
-
 // Soft leading edge of the reveal, in raster px: enough to anti-alias the
 // front, never enough to show ink ahead of the nib.
 const FRONT_FEATHER_PX = 1.5;
@@ -59,7 +56,6 @@ export class Animator {
     this._paths = [];
     this._ribbons = [];
     this._bands = [];
-    this.pen = null;                        // a written word from the pen model, instead of an analysis
   }
 
   get duration() {
@@ -68,44 +64,12 @@ export class Animator {
 
   /** Ink pixels no pen pass reaches; they appear when the run completes. */
   get unreachedInk() {
-    return this.pen ? 0 : this.maps?.unassigned ?? 0;
-  }
-
-  /** Show a word written by the pen model (see pen/compose.js). */
-  loadPen(result) {
-    this.stop();
-    this.analysis = null;
-    this.maps = null;
-    this.layers = [];
-    this.chains = [];
-    this._paths = [];
-    this._ribbons = [];
-    this._bands = [];
-    this.pen = result;
-    // the ink each chain lays down: a ribbon at the nib's width
-    for (const c of this.pen.chains) {
-      const n = c.pts.length;
-      c.left = new Array(n);
-      c.right = new Array(n);
-      for (let k = 0; k < n; k++) {
-        const a = c.pts[Math.max(0, k - 1)], b = c.pts[Math.min(n - 1, k + 1)];
-        const dx = b[0] - a[0], dy = b[1] - a[1];
-        const l = Math.hypot(dx, dy) || 1;
-        const nx = -dy / l, ny = dx / l;
-        const hw = c.widths[k] / 2;
-        c.left[k] = [c.pts[k][0] + nx * hw, c.pts[k][1] + ny * hw];
-        c.right[k] = [c.pts[k][0] - nx * hw, c.pts[k][1] - ny * hw];
-      }
-      c.cum = cumulativeLengths(c.pts);
-    }
-    this.rebuildTimeline(false);
-    this.resize();
+    return this.maps?.unassigned ?? 0;
   }
 
   /** Build the reveal maps and the timeline. Call after analysis / replan. */
   load(analysis) {
     this.stop();
-    this.pen = null;
     this.analysis = analysis;
     this.chains = planChains(analysis.plan);
     this.maps = buildRevealMaps(analysis, this.chains, this._upem());
@@ -117,25 +81,6 @@ export class Animator {
   }
 
   rebuildTimeline(keepPosition) {
-    if (this.pen) {
-      // the model has its own clock; the speed slider scales it
-      const frac = keepPosition && this.timeline ? this.time / this.timeline.total : 0;
-      const k = PEN_NOMINAL_SPEED / this.speed;
-      // natural speed: the model's own pace along each chain; otherwise the
-      // pen moves at constant speed within a chain (the chain keeps its length
-      // of time, so words and lifts stay where they are)
-      const natural = this.model?.natural !== false;
-      const chains = this.pen.chains.map((c) => {
-        const dur = (c.t1 - c.t0) * k;
-        const L = c.cum[c.cum.length - 1] || 1;
-        const tTab = natural ? c.times.map((t) => t * k) : c.cum.map((s) => (s / L) * dur);
-        return { id: c.id, t0: c.t0 * k, t1: c.t1 * k, L: c.L, poly: c.pts, cum: c.cum, items: [], sTab: c.cum, tTab, pen: c };
-      });
-      const lifts = this.pen.lifts.map((l) => ({ ...l, t0: l.t0 * k, t1: l.t1 * k }));
-      this.timeline = { chains, lifts, total: this.pen.total * k, unitsPerEm: this.pen.unitsPerEm };
-      this.time = frac * this.timeline.total;
-      return;
-    }
     if (!this.analysis?.plan) return;
     const frac = keepPosition && this.timeline ? this.time / this.timeline.total : 0;
     const upem = this._upem();
@@ -149,12 +94,11 @@ export class Animator {
   }
 
   resize() {
-    if (!this.analysis && !this.pen) return;
+    if (!this.analysis) return;
     const cssW = this.canvas.clientWidth || 900;
     const cssH = this.canvas.clientHeight || 320;
     this.ctx = setupHiDPI(this.canvas, cssW, cssH);
-    const bounds = this.pen ? this.pen.bounds : this.analysis.bounds;
-    this.layout = computeLayout(bounds, cssW, Math.max(80, cssH - this.bottomInset), 40);
+    this.layout = computeLayout(this.analysis.bounds, cssW, Math.max(80, cssH - this.bottomInset), 40);
     this.drawAt(this.time);
   }
 
@@ -245,8 +189,8 @@ export class Animator {
    * next frame is drawn into the same canvas.
    */
   async renderFrames({ width = 1920, fps = 60, hold = 1, margin = 0.06, showPen = this.showPen } = {}, onFrame) {
-    if (!this.timeline || (!this.analysis && !this.pen)) throw new Error('nothing to render yet');
-    const bounds = this.pen ? this.pen.bounds : this.analysis.bounds;
+    if (!this.timeline || !this.analysis) throw new Error('nothing to render yet');
+    const bounds = this.analysis.bounds;
     const W = width - (width % 2);
     const pad = Math.round(W * margin);
     let H = Math.round((W - 2 * pad) * (Math.max(bounds.h, 1) / Math.max(bounds.w, 1)) + 2 * pad);
@@ -278,28 +222,15 @@ export class Animator {
   }
 
   _upem() {
-    if (this.pen) return this.pen.unitsPerEm;
     return this.analysis?.glyphs.find((g) => g.record)?.record.unitsPerEm || 1000;
   }
 
   /** @param {number} T seconds into the timeline */
   drawAt(T) {
     const { ctx, analysis, layout, timeline } = this;
-    if (!ctx || !timeline || (!analysis && !this.pen)) return;
+    if (!ctx || !timeline || !analysis) return;
     const cssW = layout.cssWidth, cssH = layout.cssHeight;
     ctx.clearRect(0, 0, cssW, cssH);
-    if (this.pen) {
-      // the word is the ink the nib lays down along the model's trajectory
-      for (const chain of timeline.chains) {
-        const revealed = T < chain.t0 ? 0 : T >= chain.t1 ? chain.L : arcAt(chain, T);
-        if (revealed > 0) this._paintRibbon({ pts: chain.pen.pts, cum: chain.cum, left: chain.pen.left, right: chain.pen.right }, revealed);
-      }
-      if (this.showPen && T < timeline.total) {
-        const st = penState(timeline, T);
-        if (st) this._drawPen(this._toCss(st.at), st.kind === 'up');
-      }
-      return;
-    }
     const dpr = this.canvas.width / cssW;
 
     // how far along each chain the nib is, in font units

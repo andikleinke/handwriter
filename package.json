@@ -1,12 +1,12 @@
 {
   "name": "handwriter-stroke-recovery",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Prototype: recovering pen strokes and centrelines from a static cursive font",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/pen-test.mjs",
+    "test": "node --check src/main.js && node --check src/render/animator.js && node --check src/render/sweep.js",
     "deploy": "sh scripts/deploy-pages.sh"
   },
   "keywords": [],

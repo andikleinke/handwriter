@@ -10,9 +10,6 @@ import { version } from '../package.json';
 import versions from '../versions.json';
 import { loadFont } from './lib/shaping.js';
 import { fontStore } from './lib/fontStore.js';
-import { composeWord } from './pen/compose.js';
-import { STYLES as PEN_STYLES } from './pen/grammar.js';
-import { renderPenDebug } from './render/penDebug.js';
 import { analyzeWord, toJSON, rebuildPlan, refreshGlyphRecord } from './lib/analyze.js';
 import { derivePath } from './lib/penPlan.js';
 import { checkAnalysis } from './lib/fontCheck.js';
@@ -32,10 +29,6 @@ import { renderDebugView, hitTestStroke } from './render/debugView.js';
 import { Animator } from './render/animator.js';
 import { CanvasRecorder } from './render/recorder.js';
 import { downloadBlob } from './render/takes.js';
-import { penToSvg } from './pen/svg.js';
-import { fitHand } from './pen/fit.js';
-import { letterFromWaypoints } from './pen/letters.js';
-import { handStore } from './lib/handStore.js';
 import { fontKeyOf } from './lib/cache.js';
 import { renderInternals } from './render/internals.js';
 import { strokeColor } from './render/layout.js';
@@ -45,23 +38,6 @@ const el = {
   text: $('text'),
   analyze: $('analyze'),
   fontfile: $('fontfile'),
-  source: $('source'),
-  animmeta: $('animmeta'),
-  penhandfield: $('penhandfield'),
-  penhand: $('penhand'),
-  penrow: $('penrow'),
-  penslant: $('penslant'),
-  penslantval: $('penslantval'),
-  pentempo: $('pentempo'),
-  pentempoval: $('pentempoval'),
-  penvar: $('penvar'),
-  penwrap: $('penwrap'),
-  penfit: $('penfit'),
-  penhandremove: $('penhandremove'),
-  penhanddownload: $('penhanddownload'),
-  penvarval: $('penvarval'),
-  pennib: $('pennib'),
-  pentake: $('pentake'),
   fontpick: $('fontpick'),
   fontremove: $('fontremove'),
   rasterEm: $('rasterEm'),
@@ -103,7 +79,6 @@ const el = {
   playpause: $('playpause'),
   record: $('record'),
   takelink: $('takelink'),
-  exportsvg: $('exportsvg'),
   exportmovie: $('exportmovie'),
   movieformat: $('movieformat'),
   takeinfo: $('takeinfo'),
@@ -169,7 +144,6 @@ function clearTake() {
 }
 let fontCtx = null;
 let analysis = null;
-let penResult = null;   // the pen model's word, when that is the source
 let scrubbing = false;
 let selection = null; // {glyphIndex, strokeIndex, pointIndex?} of the stroke being edited
 let debugLayout = null;
@@ -212,7 +186,6 @@ async function useFont(arrayBuffer, name) {
     `GSUB: ${fontCtx.gsubFeatures.join(', ') || 'none'}`,
     `HarfBuzz ${fontCtx.harfbuzzVersion}`,
   ].join(' · ');
-  updateHandButtons();
 }
 
 /* ---------------------------------------------------------- font picker -- */
@@ -272,163 +245,6 @@ async function pickFont(id) {
 })();
 
 el.fontpick.addEventListener('change', () => pickFont(el.fontpick.value));
-el.source.addEventListener('change', () => {
-  const pen = el.source.value === 'pen';
-  el.penhandfield.hidden = !pen;
-  el.penrow.hidden = !pen;
-  // the A-Z strip corrects a font's recovered paths; the pen model has none
-  el.lettermode.hidden = pen;
-  if (pen && !el.letterpanel.hidden) el.lettermode.click();
-  run();
-});
-/* ------------------------------------------------------- fitted hands -- */
-
-/** Hands fitted from fonts, as stored: {id, name, fontKey, hand}. */
-let fittedHands = [];
-
-/** The picker: built-in hands first, then every fitted one; keeps the choice. */
-async function refreshHandPicker(selectedId) {
-  fittedHands = await handStore.list();
-  const want = selectedId ?? el.penhand.value ?? handStore.choice;
-  el.penhand.innerHTML = '';
-  for (const id of Object.keys(PEN_STYLES)) {
-    const o = document.createElement('option');
-    o.value = id;
-    o.textContent = PEN_STYLES[id].name;
-    el.penhand.appendChild(o);
-  }
-  if (fittedHands.length) {
-    const grp = document.createElement('optgroup');
-    grp.label = 'fitted from fonts';
-    for (const f of fittedHands) {
-      const o = document.createElement('option');
-      o.value = `fit:${f.id}`;
-      o.textContent = `${f.name} (fitted)`;
-      grp.appendChild(o);
-    }
-    el.penhand.appendChild(grp);
-  }
-  el.penhand.value = [...el.penhand.options].some((o) => o.value === want) ? want : 'school';
-  updateHandButtons();
-}
-
-function updateHandButtons() {
-  const fitted = el.penhand.value.startsWith('fit:');
-  el.penhandremove.hidden = !fitted;
-  el.penhanddownload.hidden = !fitted;
-  el.penfit.hidden = !fontCtx;
-}
-
-/** A hand by picker value: a built-in preset, or a fitted hand with its own letters. */
-function handById(id) {
-  if (id && id.startsWith('fit:')) {
-    const rec = fittedHands.find((f) => `fit:${f.id}` === id);
-    if (rec) {
-      const letters = {};
-      for (const [ch, e] of Object.entries(rec.hand.letters)) letters[ch] = letterFromWaypoints(ch, e);
-      return { ...PEN_STYLES.school, ...rec.hand.style, id, name: `${rec.name} (fitted)`, letters };
-    }
-  }
-  return PEN_STYLES[id] || PEN_STYLES.school;
-}
-
-/**
- * Fit a hand to the current font: recover every letter on its own (isolated
- * forms, no contextual alternates), then derive waypoints, slant and nib.
- */
-async function fitHandFromCurrentFont() {
-  if (!fontCtx) return;
-  // the picker's label names the font best (the bundled font's family name is not in its name table)
-  const picked = el.fontpick.selectedOptions[0]?.textContent.replace(/ \(default\)$/, '');
-  const name = picked || fontCtx.familyName || fontCtx.sourceName || 'font';
-  el.penfit.disabled = true;
-  document.body.classList.add('busy');
-  const letters = [];
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  try {
-    for (let i = 0; i < chars.length; i++) {
-      const ch = chars[i];
-      el.fontinfo.textContent = `fitting a hand to ${name}: ${ch} (${i + 1}/${chars.length})`;
-      await new Promise((r) => setTimeout(r, 0));
-      const a = analyzeWord(fontCtx, ch, store, { rasterEm: clampInt(el.rasterEm.value, 128, 1024, 512), connect: false });
-      const g = a.glyphs.find((x) => !x.isBlank && x.record);
-      letters.push({ ch, record: g?.record ?? null, raster: g?.raster ?? null, xAdvance: g?.xAdvance ?? fontCtx.xHeight });
-    }
-    const { hand } = fitHand({
-      name,
-      fontKey: fontKeyOf(fontCtx),
-      metrics: { unitsPerEm: fontCtx.unitsPerEm, xHeight: fontCtx.xHeight, ascender: fontCtx.ascender, descender: fontCtx.descender, capHeight: fontCtx.ot?.tables?.os2?.sCapHeight || null },
-      letters,
-    });
-    calibrateTempo(hand);
-    const id = await handStore.add(name, hand.fontKey, hand);
-    await refreshHandPicker(`fit:${id}`);
-    handStore.choice = el.penhand.value;
-    applyPenPreset(el.penhand.value);
-    el.source.value = 'pen';
-    el.source.dispatchEvent(new Event('change'));
-  } catch (err) {
-    console.error(err);
-    el.fontinfo.innerHTML = `<span class="err">fitting failed: ${escapeHtml(String(err))}</span>`;
-  } finally {
-    el.penfit.disabled = false;
-    document.body.classList.remove('busy');
-  }
-}
-
-/**
- * A fitted face may carry far more path per letter than the school hand (a
- * flamboyant script with long lead-outs) or far less; the tempo is scaled so
- * the pen covers x-heights per second at the school hand's pace.
- */
-function calibrateTempo(hand) {
-  const letters = {};
-  for (const [ch, e] of Object.entries(hand.letters)) letters[ch] = letterFromWaypoints(ch, e);
-  const probe = 'abcdefghijklmnopqrstuvwxyz';
-  const pace = (style) => {
-    const r = composeWord(probe, { ...style, variability: 0 });
-    const path = r.chains.reduce((s, c) => s + c.L, 0) / r.xHeight;
-    return path / Math.max(1e-6, r.total);
-  };
-  const want = pace(PEN_STYLES.school);
-  const got = pace({ ...PEN_STYLES.school, ...hand.style, letters });
-  if (got > 0 && want > 0) {
-    hand.style.tempo = Math.round(Math.min(0.2, Math.max(0.04, hand.style.tempo * (got / want))) * 1000) / 1000;
-    hand.report[0].message += `; tempo set to ${Math.round(hand.style.tempo * 1000)} ms for the school hand's pace (${want.toFixed(1)} x-heights/s)`;
-  }
-}
-
-el.penfit.addEventListener('click', () => fitHandFromCurrentFont());
-el.penhandremove.addEventListener('click', async () => {
-  const id = el.penhand.value;
-  if (!id.startsWith('fit:')) return;
-  await handStore.remove(id.slice(4));
-  await refreshHandPicker('school');
-  handStore.choice = 'school';
-  applyPenPreset('school');
-  run();
-});
-el.penhanddownload.addEventListener('click', () => {
-  const rec = fittedHands.find((f) => `fit:${f.id}` === el.penhand.value);
-  if (!rec) return;
-  const blob = new Blob([JSON.stringify(rec.hand, null, 1)], { type: 'application/json' });
-  downloadBlob(blob, `hand-${rec.name.replace(/\W+/g, '_')}.json`);
-});
-
-(async () => {
-  await refreshHandPicker(handStore.choice);
-  applyPenPreset(el.penhand.value);
-})();
-el.penhand.addEventListener('change', () => { handStore.choice = el.penhand.value; applyPenPreset(el.penhand.value); updateHandButtons(); run(); });
-el.penslant.addEventListener('input', () => { el.penslantval.textContent = el.penslant.value; });
-el.penslant.addEventListener('change', () => run());
-el.pentempo.addEventListener('input', () => { el.pentempoval.textContent = el.pentempo.value; });
-el.pentempo.addEventListener('change', () => run());
-el.penvar.addEventListener('input', () => { el.penvarval.textContent = el.penvar.value; });
-el.penvar.addEventListener('change', () => run());
-el.pennib.addEventListener('change', () => run());
-el.penwrap.addEventListener('change', () => run());
-el.pentake.addEventListener('click', () => { penSeed++; run(); });
 
 el.fontfile.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
@@ -691,10 +507,6 @@ el.letterstrip.addEventListener('click', (e) => {
 
 /** Analyse the text field; resolves true once the new analysis is in place. */
 function run() {
-  if (el.source.value === 'pen') return runPen();
-  penResult = null;
-  el.exportsvg.hidden = true;
-  el.animmeta.textContent = "the font's own outlines, uncovered by a round nib that follows the recovered path";
   if (!fontCtx) return Promise.resolve(false);
   const text = letterMode ?? (el.text.value ?? '').replace(/\s*\n\s*/g, ' ');
   if (!text.length) return Promise.resolve(false);
@@ -772,85 +584,6 @@ function loadAnimator() {
   animator.load(analysis);
 }
 
-/**
- * The pen model: the word is written from the letter grammar - no font, no
- * skeleton - timed by the kinematic model and inked by the nib.
- */
-let penSeed = 1;
-
-/** The pen style as set in the controls: a hand's preset, with the sliders over it. */
-function currentPenStyle() {
-  const base = handById(el.penhand.value);
-  const nibType = el.pennib.value;
-  const nib = nibType === base.nib.type ? base.nib
-    : nibType === 'mono' ? { type: 'mono', wMin: 0.07, wMax: 0.07 }
-    : nibType === 'broad' ? { type: 'broad', wMin: 0.03, wMax: 0.17, angle: 45 }
-    : { type: 'pointed', wMin: 0.04, wMax: 0.15 };
-  return {
-    ...base,
-    slant: Number(el.penslant.value),
-    tempo: Number(el.pentempo.value) / 1000,
-    variability: Number(el.penvar.value),
-    wrapEm: Math.max(0, Number(el.penwrap.value) || 0),
-    nib,
-    seed: penSeed,
-  };
-}
-
-/** Put a hand's preset into the controls. */
-function applyPenPreset(id) {
-  const s = handById(id);
-  el.penslant.value = String(s.slant);
-  el.penslantval.textContent = String(s.slant);
-  el.pentempo.value = String(Math.round(s.tempo * 1000));
-  el.pentempoval.textContent = String(Math.round(s.tempo * 1000));
-  el.penvar.value = String(s.variability);
-  el.penvarval.textContent = String(s.variability);
-  el.pennib.value = s.nib.type;
-}
-
-function runPen() {
-  clearTake();
-  const text = letterMode ?? el.text.value;
-  try {
-    analysis = null;
-    const PEN_STYLE = currentPenStyle();
-    el.animmeta.textContent = 'the pen model: letters written from their taught strokes, timed by the kinematic model, inked by the nib';
-    penResult = composeWord(text, PEN_STYLE);
-    const fitted = fittedHands.find((f) => `fit:${f.id}` === el.penhand.value);
-    if (fitted?.hand.report) penResult.notes.unshift(...fitted.hand.report);
-    window.__pen = penResult; // handy from the console while tuning
-    paintDebug();
-    el.strokelist.innerHTML = '';
-    el.editcontrols.hidden = true;
-    el.internalsview.hidden = true;
-    const strokes = penResult.chains.reduce((n, c) => n + c.targets.length - 1, 0);
-    el.shapinginfo.innerHTML = [
-      `pen model · <b>${escapeHtml(PEN_STYLE.name)}</b> · slant ${PEN_STYLE.slant}° · ${PEN_STYLE.nib.type} nib · tempo ${Math.round(PEN_STYLE.tempo * 1000)} ms · take ${penSeed}`,
-      `${penResult.chains.length} pen-down chain${penResult.chains.length === 1 ? '' : 's'} · ${strokes} strokes · ${penResult.total.toFixed(1)} s`,
-    ].join('<br>');
-    el.log.innerHTML = penResult.notes.length
-      ? penResult.notes.map((n) => `<div class="entry ${n.severity}"><span>${n.code}</span><span>${escapeHtml(n.message)}</span></div>`).join('')
-      : '<div class="entry info"><span>ok</span><span>every letter has a grammar</span></div>';
-    el.logcount.textContent = `${penResult.notes.length} note${penResult.notes.length === 1 ? '' : 's'}`;
-    el.json.textContent = JSON.stringify({
-      source: 'pen', text, style: PEN_STYLE,
-      chains: penResult.chains.map((c) => ({ id: c.id, seconds: +(c.t1 - c.t0).toFixed(3), targets: c.targets.map((p) => p.map((v) => Math.round(v))), samples: c.pts.length })),
-    }, null, 2);
-    animator.speed = Number(el.speed.value);
-    animator.loop = el.loop.checked;
-    animator.showPen = el.showpen.checked;
-    animator.loadPen(penResult);
-    el.exportsvg.hidden = false;
-    animator.play();
-    return Promise.resolve(true);
-  } catch (err) {
-    console.error(err);
-    el.shapinginfo.innerHTML = `<span class="err">${escapeHtml(String(err))}</span>`;
-    return Promise.resolve(false);
-  }
-}
-
 /** Order, lifts and bridges are derived data: recompute and repaint them. */
 function replan() {
   if (!analysis) return;
@@ -865,11 +598,6 @@ function replan() {
 }
 
 function paintDebug() {
-  if (penResult) {
-    debugLayout = renderPenDebug(el.debug, penResult, view);
-    window.__debugLayout = debugLayout;
-    return;
-  }
   debugLayout = renderDebugView(el.debug, analysis, {
     showOutlines: el.outlines.checked,
     showArrows: el.arrows.checked,
@@ -1124,7 +852,7 @@ function paintJSON() {
 
 el.analyze.addEventListener('click', run);
 el.text.addEventListener('keydown', (e) => {
-  // Enter analyses, Shift+Enter starts a new line (the pen model writes lines)
+  // Enter analyses, Shift+Enter starts a new line (folded into a space by run)
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); }
 });
 el.text.addEventListener('input', () => {
@@ -1533,13 +1261,6 @@ el.copyjson.addEventListener('click', async () => {
   setTimeout(() => (el.copyjson.textContent = 'Copy'), 1200);
 });
 
-el.exportsvg.addEventListener('click', () => {
-  if (!penResult) return;
-  const svg = penToSvg(penResult, { pxPerEm: 160 });
-  const name = `handwriting-${penResult.text.replace(/\W+/g, '_')}.svg`;
-  downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), name);
-});
-
 /*
  * Export movie. The animator renders the run frame by frame on a fixed clock
  * into a canvas of its own, transparent; each frame goes to the dev server as
@@ -1568,7 +1289,7 @@ el.exportmovie.addEventListener('click', async () => {
   const label = el.exportmovie.textContent;
   el.exportmovie.disabled = true;
   const codec = el.movieformat.value;
-  const text = (penResult?.text || analysis?.text || 'word').replace(/\W+/g, '_');
+  const text = (analysis?.text || 'word').replace(/\W+/g, '_');
   try {
     let id;
     try {
@@ -1615,7 +1336,7 @@ let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if (!analysis && !penResult) return;
+    if (!analysis) return;
     paintDebug();
     animator.resize();
   }, 120);

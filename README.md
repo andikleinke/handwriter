@@ -38,55 +38,38 @@ Open http://localhost:5173.
 
 ## What to try
 
-1. **"hello"** (the default) is written by the **pen model** in the **looped
-   school hand**: letters from taught strokes, joined by connectors, timed by
-   the kinematic model, inked by a pointed nib. The **Hand** picker offers the
-   school hand, Palmer, Copperplate and a broad-edge nib; **Slant**, **Tempo**
-   and **Looseness** override the hand, **Nib** swaps the pen, **Another take**
-   rewrites the text with fresh small deviations.
-2. Several lines: Shift+Enter in the text field starts a new line (Enter
-   analyses); **Wrap at** breaks the text by word at a width in em.
-3. **Export SVG** saves the written word as vector ink; **● Record** captures
-   one run of the preview as a video.
-4. **Fit hand from font** derives a hand from the current font: the font
-   route recovers every letter's pen path, and the pen model then writes in
-   the font's letterforms with its own joins and dynamics. Fitted hands are
-   kept in this browser and listed under the built-in ones, with **Remove
-   hand** and **Download hand**; the fit report appears with the word's
-   notes.
-5. Switch **Source** to the **font outline** for the recovery route: HarfBuzz
-   returns **4 glyphs** for "hello" — `h`, `e`, `l_l`, `o` — where a naive
+1. **"hello"** (the default) with **Autography** picked as the font:
+   HarfBuzz returns **4 glyphs** — `h`, `e`, `l_l`, `o` — where a naive
    per-character lookup would give 5; the `liga` feature fires, so the
    pipeline is genuinely shaping rather than looking up characters. It
    recovers as 4 strokes, and with **connect letters** on, "hell" is written
    as one continuous pen-down motion: the dotted grey connectors in the debug
-   view are the bridges. **"flighty"** exercises the i-dot (drawn after the
-   letter body), the t-crossbar (deferred to last) and two descenders;
-   **"Jazz it up!"** capitals, whitespace, punctuation and a contextual
-   alternate (`t.1`, chosen by `calt`).
-6. The **Font** picker offers the bundled faces first (Pinyon Script, then Autography) and every font
+   view are the bridges. **"flighty"** exercises the
+   i-dot (drawn after the letter body), the t-crossbar (deferred to last) and
+   two descenders; **"Jazz it up!"** capitals, whitespace, punctuation and a
+   contextual alternate (`t.1`, chosen by `calt`).
+2. The **Font** picker offers the bundled faces first (Pinyon Script, then Autography) and every font
    you have added with **+ Add font…**; added fonts are kept in this browser
    (IndexedDB) and offered again next time, and **Remove** forgets the selected
    one. The last choice is remembered.
-7. Tick **raster + skeleton** (font route) to see the binary bitmap and thinned
+3. Tick **raster + skeleton** to see the binary bitmap and thinned
    centreline each glyph was actually derived from. This is the view that
    tells you whether a bad result is a heuristics problem or a rasterisation
    problem.
-8. The preview has player controls over its bottom edge: play/pause, **●
+4. The preview has player controls over its bottom edge: play/pause, **●
    Record**, and a scrub bar with the time. Drag the bar to step through the
    animation, or change **Avg speed** (up to 4 em/s). **Pen tip** marks the
    pen, on paper and in the air. **Natural speed** toggles the research-based
    velocity model against constant speed; **connect letters** toggles the
-   bridging (font route); **loop** runs the animation continuously.
-9. **Zoom the debug view** (up to 800%) with its − / + / fit buttons, or by
+   bridging; **loop** runs the animation continuously.
+5. **Zoom the debug view** (up to 800%) with its − / + / fit buttons, or by
    scrolling over it — zoom happens at the cursor. Drag empty space to pan.
    Stroke lines, handles and badges keep their screen size, which is what
    makes zoomed editing easy. The animation preview always shows the whole
    text.
-10. Read the **uncertainty log** — ambiguous junctions, near-tied starting
-    points, deferred crossbars, reversed strokes; with the pen model, the
-    grammar's notes and a fitted hand's report.
-11. **Copy** / **Download** the JSON to see the cacheable data layer.
+6. Read the **uncertainty log** — ambiguous junctions, near-tied starting
+   points, deferred crossbars, reversed strokes.
+7. **Copy** / **Download** the JSON to see the cacheable data layer.
 
 ## Pipeline
 
@@ -245,9 +228,8 @@ exit meets the next letter's own entry hairline the two flow straight on
 
 Records now carry the ink width under every point (`widths`) and the ink a
 stroke writes against these rules as the search judged it (`againstRule`).
-`scripts/pen-test.mjs` covers the pen model; the font route's invariants run
-in the page: `window.__fontCheck()` reports, per glyph, where each stroke
-starts (top of a shade, hairline, foot of a shade), shaded ink written
+The invariants run in the page: `window.__fontCheck()` reports, per glyph,
+where each stroke starts (top of a shade, hairline, foot of a shade), shaded ink written
 upward, rule violations, and per join whether the pen flowed or lifted.
 The alphabet and the pangram pass with no failures.
 
@@ -401,133 +383,15 @@ Schomaker, Acta Psychologica 82 (1993) · Fitjar et al., Frontiers in
 Psychology 12 (2021) · Paz-Villagrán, Danna & Velay, Human Movement Science
 33 (2014) · Viviani & Flash (1995).
 
-### The pen model
-
-The **Source** picker chooses between the penmanship engine described below,
-the default, and the font route: the word is *written* from a
-letter grammar (`src/pen/grammar.js`), drawn as a spline through the
-letters' waypoints (`src/pen/spline.js`), inked by a simulated nib and paced
-by the kinematic model (`src/pen/compose.js`, `src/pen/pace.js`), with no
-font and no skeleton involved. Each letter is a list of waypoints in a frame
-with the baseline at 0 and the x-height at 1, points the pen passes through
-exactly; a true reversal (the top of an `i`, a retraced stem) is a cusp
-where the pen stops and turns, and a letter may mark further stops. Joins
-are intrinsic: the composer writes the connector from the previous letter's
-last downstroke to the next letter's join target, and the checkstroke
-letters exit at x-height. The pointed nib spreads under the shade's pressure
-on downward travel and runs hairline on the rest. The debug view shows the
-path per chain and the waypoints it passes through; the speed slider scales
-the model's own clock. The alphabet - a to z and A to Z - was first derived
-from the taught stroke sequences in `templates.js` (`src/pen/letters.js`)
-and has since been authored letter by letter (below).
-Dots, t-bars and the second slant of an `x` are written after the word; a
-capital's further strokes follow it with a lift. Capitals whose last stroke
-is the body itself join on into the next letter as the school hand teaches
-(A C E J L M N R U Y Z); the rest, and any capital finished by a separate
-stroke (H K F T X), end with a lift.
-
-**Geometry first, and frozen (v0.13.0).** Every letter is drawn on its own,
-once, as **Hobby's spline** through its waypoints (`src/pen/hobby.js`, a
-vendored ISC port of METAFONT's curve: it passes through every waypoint with
-near-continuous curvature and no overshoot in practice), split wherever the
-pen stops so a reversal stays a point, with the open ends pinned by phantom
-knots so the curve leaves and arrives along the stroke (`src/pen/spline.js`).
-The composer never re-solves a word: it lays the frozen glyphs out and writes
-the connectors between them, so two l's are the same l wherever they stand
-(`scripts/pen-test.mjs` checks this to floating-point precision). The nib's
-width is a function of the direction of travel along that fixed path (a
-pointed pen spreads on downward travel, a broad edge across its angle),
-swelling and fading over a short distance, tapered at the ends; marks are
-lighter. **Even mode is the default**: looseness varies the timing and the
-letter spacing only - never a shape, never a slant, never the baseline.
-
-**Anchors and variants.** Each letter carries named anchors derived once from
-its waypoints (`src/pen/letters.js`): the entry a connector lands on, per
-kind (`entry.base` from a baseline connector, `entry.mid` from a checkstroke
-bridge), the exit at which it hands over when a letter follows (`exit.at`:
-the bottom of its last downstroke, which can be cut for a bounce, or the stop
-where a checkstroke closes), and its stops. A letter may come in **variants**
-chosen by how it is entered: the ovals a d g o q are entered at their bottom
-from a baseline connector - along the bottom, up the right side, over the
-top, down the left and round to the entry, then up the right side once more,
-a hairline over a hairline - so that no connector ever crosses a counter; from
-a bridge they are entered at their top right, where the pen halts and turns
-back over the oval.
-
-**Joins.** When a letter follows, the previous letter's foot is dropped and
-the composer writes the connector from the bottom of its last downstroke: the
-stem is cut at the height that puts the bounce's bottom on the baseline
-(radius 0.15 x-heights, plus the nib's half-width there), and the connector
-is a bounce arc turning from the stem's direction until the pen points at the
-next letter's entry, then one cubic Hermite blend arriving along that glyph's
-own direction - tangent-continuous throughout, whatever the gap. From a
-checkstroke the pen halts at the stop where the letter closes and the bridge
-dips off in the direction of the letter's own tick. A word-final foot is
-written the same way, ending in the air at the letter's provisional exit.
-Capitals whose last stroke is the body itself join on (A C E J L M N R U Y Z);
-the rest, and any capital finished by a separate stroke, end with a lift.
-
-**Baseline discipline.** What sits on the line is the visible ink, not the
-centreline: after the width is known, wherever the ink's lower edge has a
-local minimum near the baseline - a foot bounce, the cusp of an m, the bottom
-of a bowl - the path is eased vertically so the edge lands exactly on it; a
-round bottom keeps the typographic overshoot of 1.5 %. A connector is shifted
-as a whole with long ramps across its junctions, so no tangent is tilted.
-
-**Tests.** `npm test` runs `scripts/pen-test.mjs`: identical repeated letters
-in even mode, the ink edge never below the line beyond the overshoot and every
-foot bounce on it, tangent continuity and bounded curvature at every join, no
-connector through the counter it enters, monotonic times with a true dwell at
-every stop, and a pair matrix aa..zz against a snapshot (`--update` to
-accept, `--strict` to fail on change).
-
-**Pace.** Along the fixed path the writing is cut into strokes the way a
-hand makes them - at every stop, and at every vertical reversal or sharp
-turn - and each stroke gets one asymmetric bell of speed (the lognormal
-profile of a human stroke, peaking early), floored so the pen slows between
-strokes but never crawls, modulated by the two-thirds power law (the pen
-slows into tight curves as v ∝ κ^(-1/3)) and, in a shaded hand, by the
-shade. A stroke lasts longer the further it reaches, but not in proportion
-(isochrony); the pen comes to rest and dwells only at a true stop
-(`src/pen/pace.js`). The research behind these choices - connected script
-typefaces' join conventions, skeleton-plus-pen construction, Hobby's and
-other splines, timing laws - is summarised in `docs/research-even-script.md`.
-
-Four hands share the grammar and differ in slant, tempo, nib and pressure,
-with values from the teaching literature: a **looped school hand** (20°,
-lightly shaded pointed nib), **Palmer** (25°, unshaded monoline, brisk),
-**Copperplate** (35° from the vertical, that is 55° from the baseline, shade
-on the downstrokes only and those slower, "slow and deliberate") and a
-**broad-edge nib at 45°** whose thick and thin follow the direction of
-travel. A fifth hand, **italic**, is a different grammar rather than a
-different pen: loop-free, branching, elliptical lowercase in the manner of
-modern italic handwriting (`src/pen/hand/italic-am.js`, `italic-nz.js`),
-joined by the same connectors, written with a monoline nib at 8°; a hand may
-bring its own letters (`style.letters`), and what the italic set lacks it
-borrows from the school hand. The italic lowercase is a first pass: its
-letters read, its joins work, but a letter written on its own still shows the
-straight lead-in as a doubled stem, and the capitals are the school hand's. With the pen model as source, a **Hand** picker and sliders for
-slant, tempo and looseness appear, a **Nib** picker overrides the hand's
-nib, and **Another take** rewrites the text with fresh small deviations: a
-loose hand lands a percent or two of x-height off its targets and never
-times two strokes alike, a stiff one repeats itself. The text may run over
-several lines (Shift+Enter in the text field starts one; Enter analyses), and
-**Wrap at** breaks lines by word at a width in em - lines sit 3.6 x-heights
-apart, and the pen's trip to the next line is a lift like any other, capped
-so a carriage return does not look like a pause for thought. `node
-scripts/pen-check.mjs [--hand=copperplate] [words…]` writes a set of words
-and the alphabet, checks that every chain lands on its last target and that
-no letter strays far from the template it came from, and draws
-`pen-sheet.svg` for a look.
-
 ### A penmanship engine instead of a font
 
-The route this prototype does not take yet - generating letterforms and pen
-paths from the principles of penmanship rather than recovering them from a
-font - was surveyed as well (sources below). The practical lineage runs from
-Knuth's Metafont, a pen dragged along a path, through Hobby splines and
-Levien's Spiro curves to today's stroke fonts (Hershey, EMS, LTTR/INK,
-Glyphs' stroke attributes), which store centrelines only and know nothing of
+The other route - generating letterforms and pen paths from the principles
+of penmanship rather than recovering them from a font - was surveyed before
+the pen model was built on it (sources below; see History for how that
+went). The practical lineage runs from Knuth's Metafont, a pen dragged
+along a path, through Hobby splines and Levien's Spiro curves to today's
+stroke fonts (Hershey, EMS, LTTR/INK, Glyphs' stroke attributes), which
+store centrelines only and know nothing of
 speed or pressure. The dynamics layer is Plamondon's kinematic theory: a word
 as the vector sum of overlapping lognormal velocity strokes aimed at virtual
 targets, where the overlap rounds corners as a hand does, jitter of a percent
@@ -950,7 +814,7 @@ there are no direction handles to pull — the shape is carried by where the
 samples are. That is why dragging one point alone dents the curve and the
 falloff exists. Everything downstream consumes polylines: the reveal map
 walks them pixel by pixel, the join planner measures tangents over a window
-of them, and the pen model's own hand is dense waypoints too.
+of them.
 
 Edits go through the same seam an AI pass would use
 (`store.override(fontKey, gid, record, 'manual')`): the record's `source`
@@ -1004,12 +868,6 @@ three endpoints (`/__movie/start`, `/frame`, `/finish`), and
 therefore needs `npm run dev` (or `vite preview`) on a Mac with Xcode or the
 command-line tools. `encode-movie --probe <file.mov>` reports a movie's
 codec, whether its track declares alpha, and the alpha it actually holds.
-
-**Export SVG** (pen model only) saves the written word as
-`handwriting-<text>.svg`: one filled path per pen-down chain, the ribbon at
-the nib's width around the trajectory, exactly the ink the preview paints
-(`src/pen/svg.js`). It is a vector of the finished word, not of the motion;
-the timing stays in the JSON.
 
 ## Audit notes
 
@@ -1122,6 +980,16 @@ command for each one; the page cannot check anything out itself, so it copies
 the command instead. `versions.json` is generated from the tags by the release
 script and is never edited by hand.
 
+### History
+
+From v0.13.0 to v0.22.0 the page had a second **Source**: a pen model that
+wrote letters from a taught letter grammar through Hobby splines, paced them
+with a kinematic model and inked them with a simulated nib, with hands fitted
+from fonts (`src/pen/`, `scripts/pen-test.mjs`, `scripts/pen-check.mjs`). It
+was retired on 2026-10-17 because its letterforms could not approach a drawn
+script face's evenness; its last state is in the tag `v0.22.0`, and the
+research behind it stays in `docs/research-even-script.md`.
+
 ## Known rough edges
 
 - **Autography's `J`: the body stroke still begins on the left half of the
@@ -1173,8 +1041,7 @@ script and is never edited by hand.
 - Pointed pen (v0.14.0): the z and the x are written in three strokes with
   the crossing hairlines of the x drawn downward (Vitolo's way); the a's and g's oval rides up under the stem for a
   third of an x-height before the stem is pulled; the o leaves by running
-  back down its right side to the exit tick, which Pinyon puts low. The
-  font route's timing is still `timing.js`, not the pen model's `pace.js`.
+  back down its right side to the exit tick, which Pinyon puts low.
 
 - The left-to-right rule is applied to strokes whose horizontal displacement
   dominates. A letter that legitimately ends left of where it started is not

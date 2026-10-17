@@ -3,7 +3,7 @@
  * the browser console (or an automation script):
  *
  *   const I = await import('/scripts/inspect.js');
- *   await I.setup('autography');          // font route, a bundled font
+ *   await I.setup('autography');          // a bundled font
  *   await I.setText('J');
  *   I.metrics();                           // late ink, pop-in, unassigned
  *   await I.atArc([700, 1010], [0.55, 0.05, 0.8, 0.3]);   // frames at arc lengths, cropped
@@ -22,11 +22,9 @@ const A = () => window.__animator;
 const G = () => window.__analysis.glyphs;
 
 export async function setup(font = 'pinyon') {
-  const s = document.getElementById('source');
-  if (s.value !== 'font') { s.value = 'font'; s.dispatchEvent(new Event('change')); await sleep(5000); }
   const pick = document.getElementById('fontpick');
   if (pick.value !== font) { pick.value = font; pick.dispatchEvent(new Event('change')); await sleep(6000); }
-  return { source: s.value, font: pick.value, info: document.getElementById('fontinfo')?.textContent?.slice(0, 60) };
+  return { font: pick.value, info: document.getElementById('fontinfo')?.textContent?.slice(0, 60) };
 }
 
 export async function setText(t) {

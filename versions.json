@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.23.0",
+    "tag": "v0.23.0",
+    "date": "2026-10-17",
+    "note": "v0.23.0 — the pen model is retired; the font route is the only source"
+  },
+  {
     "version": "0.22.0",
     "tag": "v0.22.0",
     "date": "2026-10-17",
