@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/pen-test.mjs"
+    "test": "node scripts/pen-test.mjs",
+    "deploy": "sh scripts/deploy-pages.sh"
   },
   "keywords": [],
   "author": "",
