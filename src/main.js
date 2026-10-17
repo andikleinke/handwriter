@@ -103,6 +103,8 @@ const el = {
   record: $('record'),
   takelink: $('takelink'),
   exportsvg: $('exportsvg'),
+  exportmovie: $('exportmovie'),
+  movieformat: $('movieformat'),
   takeinfo: $('takeinfo'),
   speed: $('speed'),
   timecode: $('timecode'),
@@ -1534,6 +1536,68 @@ el.exportsvg.addEventListener('click', () => {
   const svg = penToSvg(penResult, { pxPerEm: 160 });
   const name = `handwriting-${penResult.text.replace(/\W+/g, '_')}.svg`;
   downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), name);
+});
+
+/*
+ * Export movie. The animator renders the run frame by frame on a fixed clock
+ * into a canvas of its own, transparent; each frame goes to the dev server as
+ * a PNG, and the server encodes them with AVFoundation into a .mov that keeps
+ * the alpha channel (scripts/movie-server.mjs, scripts/encode-movie.swift).
+ * A browser cannot write such a movie itself, so this needs `npm run dev`.
+ */
+const MOVIE = { width: 1920, fps: 60, hold: 1 };
+let exportingMovie = false;
+
+el.movieformat.value = (() => { try { return localStorage.getItem('handwriter.movieformat') || 'prores4444'; } catch { return 'prores4444'; } })();
+el.movieformat.addEventListener('change', () => {
+  try { localStorage.setItem('handwriter.movieformat', el.movieformat.value); } catch { /* private mode */ }
+});
+
+async function postJSON(url, body) {
+  const res = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+  return data;
+}
+
+el.exportmovie.addEventListener('click', async () => {
+  if (exportingMovie || !animator.timeline) return;
+  exportingMovie = true;
+  const label = el.exportmovie.textContent;
+  el.exportmovie.disabled = true;
+  const codec = el.movieformat.value;
+  const text = (penResult?.text || analysis?.text || 'word').replace(/\W+/g, '_');
+  try {
+    let id;
+    try {
+      ({ id } = await postJSON('/__movie/start', { fps: MOVIE.fps, codec }));
+    } catch (err) {
+      throw new Error(`the dev server is not answering (${err.message}) - movie export needs \`npm run dev\`, restarted after this update`);
+    }
+    const toPng = (canvas) => new Promise((ok, no) => canvas.toBlob((b) => (b ? ok(b) : no(new Error('frame encode failed'))), 'image/png'));
+    const info = await animator.renderFrames(
+      { width: MOVIE.width, fps: MOVIE.fps, hold: MOVIE.hold, showPen: el.showpen.checked },
+      async (canvas, n, count) => {
+        const png = await toPng(canvas);
+        const res = await fetch(`/__movie/frame?id=${id}&n=${n}`, { method: 'POST', body: png });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `frame ${n} refused`);
+        el.exportmovie.textContent = `Rendering ${n + 1}/${count}`;
+      },
+    );
+    el.exportmovie.textContent = 'Encoding…';
+    const res = await fetch(`/__movie/finish?id=${id}`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `encoding failed (${res.status})`);
+    const movie = await res.blob();
+    downloadBlob(movie, `handwriting-${text}.mov`);
+    el.takeinfo.textContent = `movie: ${info.width}×${info.height}, ${info.count} frames at ${info.fps} fps, ${codec === 'prores4444' ? 'ProRes 4444' : 'HEVC + alpha'}, ${(movie.size / 1e6).toFixed(1)} MB`;
+  } catch (err) {
+    console.error(err);
+    el.takeinfo.innerHTML = `<span class="err">Export movie: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    exportingMovie = false;
+    el.exportmovie.disabled = false;
+    el.exportmovie.textContent = label;
+  }
 });
 
 el.downloadjson.addEventListener('click', () => {

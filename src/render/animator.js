@@ -226,6 +226,49 @@ export class Animator {
     }
   }
 
+  /**
+   * Render the run frame by frame on a fixed clock into a canvas of its own,
+   * for a movie: transparent background, the word fitted to `width` with a
+   * margin, `fps` frames a second, then the finished word held for `hold`
+   * seconds. Nothing is skipped or dropped the way a real-time capture drops
+   * frames, and the preview canvas is left exactly as it was.
+   *
+   * `onFrame(canvas, index, count)` may be async and is awaited before the
+   * next frame is drawn into the same canvas.
+   */
+  async renderFrames({ width = 1920, fps = 60, hold = 1, margin = 0.06, showPen = this.showPen } = {}, onFrame) {
+    if (!this.timeline || (!this.analysis && !this.pen)) throw new Error('nothing to render yet');
+    const bounds = this.pen ? this.pen.bounds : this.analysis.bounds;
+    const W = width - (width % 2);
+    const pad = Math.round(W * margin);
+    let H = Math.round((W - 2 * pad) * (Math.max(bounds.h, 1) / Math.max(bounds.w, 1)) + 2 * pad);
+    H += H % 2; // video codecs want even sizes
+    const saved = { canvas: this.canvas, ctx: this.ctx, layout: this.layout, time: this.time, showPen: this.showPen };
+    this.pause();
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.layout = computeLayout(bounds, W, H, pad);
+    this.showPen = showPen;
+    // the glyph layers are cached by reveal progress: start them afresh
+    for (const layer of this.layers) if (layer) layer.key = null;
+    const total = this.timeline.total;
+    const count = Math.ceil((total + hold) * fps) + 1;
+    try {
+      for (let f = 0; f < count; f++) {
+        this.drawAt(Math.min(total, f / fps));
+        await onFrame(canvas, f, count);
+      }
+    } finally {
+      Object.assign(this, saved);
+      for (const layer of this.layers) if (layer) layer.key = null;
+      this.drawAt(this.time);
+    }
+    return { width: W, height: H, fps, count };
+  }
+
   _upem() {
     if (this.pen) return this.pen.unitsPerEm;
     return this.analysis?.glyphs.find((g) => g.record)?.record.unitsPerEm || 1000;

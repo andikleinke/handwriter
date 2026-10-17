@@ -865,9 +865,34 @@ Chrome/Firefox produce `handwriting-<text>.webm` (VP9 where available);
 Safari falls back to MP4. Keep the tab visible while recording: browsers
 throttle hidden tabs, which stalls both the animation and the capture.
 
-This is deliberately a capture of what you saw, for sharing and review. The
-product-grade exporter — WebCodecs with a fixed frame clock, muxed to MP4,
-independent of tab visibility — is a later milestone.
+This is deliberately a capture of what you saw, for sharing and review, with
+the paper background baked in. For a movie to use elsewhere, use Export movie.
+
+**Export movie** (v0.18.0, both sources) saves `handwriting-<text>.mov` with
+a transparent background, ready to lay over anything in Keynote, Final Cut,
+Premiere or After Effects. Choose the format beside the button:
+
+| format | what it is | size of "hello" |
+| --- | --- | --- |
+| **ProRes 4444** | the editors' standard with alpha; near lossless | 56 MB |
+| **HEVC + alpha** | Apple's compressed alpha video; plays in QuickTime, Keynote, Safari | 0.7 MB |
+
+The animation is rendered frame by frame on a fixed clock - 60 fps, 1920 px
+wide, the word fitted with a 6% margin, the finished word held for a second
+at the end - so nothing is dropped the way a real-time capture drops frames,
+and the tab can be in the background. It follows the preview's settings:
+speed, natural speed, and the **pen tip** checkbox (untick it for clean ink).
+
+A browser cannot write video with alpha that these programs play (its
+WebCodecs encoders here do H.264 only, and WebM does not play in Keynote), so
+the page posts each frame to the dev server as a PNG and the server encodes
+them with AVFoundation: `scripts/movie-server.mjs` is a Vite plugin with
+three endpoints (`/__movie/start`, `/frame`, `/finish`), and
+`scripts/encode-movie.swift` is the encoder, compiled once into
+`node_modules/.cache/handwriter/` and rebuilt when the source changes. It
+therefore needs `npm run dev` (or `vite preview`) on a Mac with Xcode or the
+command-line tools. `encode-movie --probe <file.mov>` reports a movie's
+codec, whether its track declares alpha, and the alpha it actually holds.
 
 **Export SVG** (pen model only) saves the written word as
 `handwriting-<text>.svg`: one filled path per pen-down chain, the ribbon at

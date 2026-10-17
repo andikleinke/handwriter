@@ -429,3 +429,6 @@ button.ghost.active { color: var(--accent); border-color: var(--accent); }
 }
 .handtools #letterinfo { flex: 1; margin: 0; }
 .filebtn { cursor: pointer; }
+
+.moviectl { display: inline-flex; gap: 6px; align-items: center; }
+.moviectl select { padding: 6px 8px; font-size: 13px; }

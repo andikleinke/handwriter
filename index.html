@@ -117,6 +117,14 @@
           >
           <label class="check"><input type="checkbox" id="loop" checked /> loop</label>
           <button id="exportsvg" class="ghost" title="saves the written word as an SVG file (the ink as filled paths)" hidden>Export SVG</button>
+          <span class="moviectl">
+            <select id="movieformat" title="the movie keeps a transparent background in either format">
+              <option value="prores4444">ProRes 4444</option>
+              <option value="hevc-alpha">HEVC + alpha</option>
+            </select>
+            <button id="exportmovie" class="ghost"
+              title="renders the animation frame by frame (60 fps, 1920 px wide, transparent background) and saves a .mov with an alpha channel; the pen tip follows its checkbox">Export movie</button>
+          </span>
           <a id="takelink" class="takelink" hidden></a>
           <span id="takeinfo" class="meta"></span>
         </div>
