@@ -123,12 +123,14 @@
         <div class="editor">
           <div id="drawtools">
             <button id="drawMode" class="ghost" title="draw a new pen path over the letter; it becomes a stroke of that glyph">✎ draw stroke</button>
+            <button id="curveMode" class="ghost" title="edit the selected stroke by Bézier anchors and handles instead of its points">⌒ curve handles</button>
             <label class="check" title="pull hand-placed points onto the ink's centreline"
               ><input type="checkbox" id="snapInk" checked /> snap to ink</label
             >
             <span id="edithint" class="meta"
               >Click a stroke to edit it, then click one of its points to pick it. Drag a point to
               reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point; [ and ] make its width thinner or wider (⇧ by a fifth), \ gives it the ink's width back.
+              With ⌒ curve handles on, the stroke shows Bézier anchors (squares) and handles (knobs): drag an anchor and its handles come along, drag a handle and its partner stays in line (hold ⌥ to break it).
               ⌘Z / ⌘⇧Z undo and redo.</span
             >
           </div>

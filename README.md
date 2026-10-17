@@ -921,6 +921,17 @@ Click any stroke — directly in the debug view or via its chip — then:
 - **[ / ]** narrow or widen the stroke at the picked point by 5 % (shift:
   20 %), **\\** resets it; the stroke renderer blends the width in over
   0.04 em either side (v0.28.0)
+- **⌒ curve handles** (v0.30.0) edits the selected stroke as a cubic
+  Bézier instead of point by point: its points are fitted with Schneider's
+  algorithm to within 0.006 em (`src/lib/bezier.js`), and the view shows
+  the anchors as squares and the handles as knobs. Drag an anchor and its
+  handles come along; drag a handle and its partner stays in line with its
+  own length (hold ⌥ to break the pair). On every move the stroke's points
+  are re-sampled from the curve at 0.004 em, hand-set widths follow to the
+  nearest new point, and the curve is kept on the stroke record (`curve`)
+  so the next session shows the same handles. Any point-level edit (a drag,
+  a delete, a split, a reverse) drops the stored curve and the next fit
+  starts from the points again.
 - **↶ undo / ↷ redo** (⌘Z, ⌘⇧Z; ⌃Z, ⌃⇧Z or ⌃Y) step through the last 50
   edits of the session, of any kind. Undoing back past a glyph's first edit
   drops its override, so the glyph goes back to being derived
@@ -940,9 +951,11 @@ somewhere deliberately stays there.
 A stroke's points are **dense samples of the path, not Bézier anchors**: they
 sit a raster pixel or two apart (`resample` at 0.004 em in
 `strokeRecovery.js`), and the curve between them is the polyline itself, so
-there are no direction handles to pull — the shape is carried by where the
-samples are. That is why dragging one point alone dents the curve and the
-falloff exists. Everything downstream consumes polylines: the reveal map
+by themselves there are no direction handles to pull — the shape is carried
+by where the samples are. That is why dragging one point alone dents the
+curve and the falloff exists, and why **⌒ curve handles** fits a Bézier
+over the points as a view and samples it back, rather than making the
+record a curve: everything downstream keeps consuming polylines. Everything downstream consumes polylines: the reveal map
 walks them pixel by pixel, the join planner measures tangents over a window
 of them.
 

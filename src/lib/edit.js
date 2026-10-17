@@ -6,6 +6,7 @@
  */
 
 import { polylineLength, resample, smoothPolyline, simplifyRDP, roundPts } from './geometry.js';
+import { fitCubics, anchorsFromSegments, curveToPolyline } from './bezier.js';
 import { fontToRaster, rasterToFont } from './raster.js';
 import { snapToInk, inkWidthAt } from './snap.js';
 
@@ -21,6 +22,7 @@ export function splitStroke(record, strokeIndex, pointIndex) {
   const second = s.points.slice(pointIndex);
   const make = (points, from) => ({
     ...s,
+    curve: undefined,
     points,
     widths: s.widths ? s.widths.slice(from, from + points.length) : undefined,
     widthEdits: s.widthEdits ? remapWidthEdits(s.widthEdits, (i) => (i >= from && i < from + points.length ? i - from : null)) : undefined,
@@ -105,6 +107,7 @@ export function dragPoint(record, strokeIndex, pointIndex, base, x, y, radius) {
   if (!s || !base[pointIndex]) return null;
   const pts = s.points;
   const dx = x - base[pointIndex][0], dy = y - base[pointIndex][1];
+  delete s.curve; // the curve was a view over the points; they lead now
   pts[pointIndex] = [round2(x), round2(y)];
   let lo = pointIndex, hi = pointIndex;
   if (radius > 0) {
@@ -134,6 +137,7 @@ export function deletePoint(record, strokeIndex, pointIndex) {
   if (!s || s.points.length <= 3) return false;
   if (pointIndex <= 0 || pointIndex >= s.points.length - 1) return false;
   s.points.splice(pointIndex, 1);
+  delete s.curve;
   if (s.widths) s.widths.splice(pointIndex, 1);
   if (s.widthEdits) s.widthEdits = remapWidthEdits(s.widthEdits, (i) => (i === pointIndex ? null : i > pointIndex ? i - 1 : i));
   s.lengthFontUnits = round2(polylineLength(s.points));
@@ -166,7 +170,77 @@ export function snapStrokeRange(glyph, record, strokeIndex, lo, hi) {
   const slice = s.points.slice(lo, hi + 1).map((p) => fontToRaster(raster, p[0], p[1]));
   const snapped = snapToInk(raster, slice, maxDist).map((p) => rasterToFont(raster, p[0], p[1]));
   for (let i = lo; i <= hi; i++) s.points[i] = roundPts([snapped[i - lo]], 2)[0];
+  delete s.curve;
   s.lengthFontUnits = round2(polylineLength(s.points));
+}
+
+/* ------------------------------------------------------------- curves --- */
+
+export const CURVE_FIT_EM = 0.006;  // a fitted curve stays within this much of the points
+export const CURVE_STEP_EM = 0.004; // points sampled from a curve sit this far apart (as recovery's)
+export const CURVE_RDP_EM = 0.0012; // ...then thinned to within this, as recovery does (rdpEps = 0.0012 em)
+
+/**
+ * The stroke's curve: the one a hand shaped, else a fresh fit over its
+ * points (bezier.js). Anchors are in the glyph's units like the points.
+ */
+export function strokeCurve(record, strokeIndex) {
+  const s = record.strokes[strokeIndex];
+  if (!s) return null;
+  if (s.curve) return s.curve.map((a) => ({ p: a.p.slice(), in: a.in ? a.in.slice() : null, out: a.out ? a.out.slice() : null }));
+  return anchorsFromSegments(fitCubics(s.points, CURVE_FIT_EM * (record.unitsPerEm || 1000)));
+}
+
+/**
+ * Move an anchor (`which` = 'p', its handles come along) or a handle ('in' /
+ * 'out'; the opposite handle stays in line, keeping its length, unless
+ * `free`). The curve is applied to the stroke: its points are re-sampled
+ * from it and hand-set widths follow to the nearest new point.
+ */
+export function moveCurveHandle(record, strokeIndex, curve, anchorIndex, which, x, y, { free = false } = {}) {
+  const a = curve[anchorIndex];
+  if (!a) return false;
+  if (which === 'p') {
+    const dx = x - a.p[0], dy = y - a.p[1];
+    a.p = [x, y];
+    if (a.in) a.in = [a.in[0] + dx, a.in[1] + dy];
+    if (a.out) a.out = [a.out[0] + dx, a.out[1] + dy];
+  } else {
+    a[which] = [x, y];
+    const other = which === 'in' ? 'out' : 'in';
+    if (!free && a[other]) {
+      const l = Math.hypot(a[other][0] - a.p[0], a[other][1] - a.p[1]);
+      const dx = a.p[0] - x, dy = a.p[1] - y, dl = Math.hypot(dx, dy);
+      if (dl > 1e-9) a[other] = [a.p[0] + (dx / dl) * l, a.p[1] + (dy / dl) * l];
+    }
+  }
+  return applyCurve(record, strokeIndex, curve);
+}
+
+/** Replace the stroke's points by samples of `curve`; the curve is kept on the stroke. */
+export function applyCurve(record, strokeIndex, curve) {
+  const s = record.strokes[strokeIndex];
+  if (!s || curve.length < 2) return false;
+  const old = s.points;
+  const upem = record.unitsPerEm || 1000;
+  // sampled like a recovered stroke, then thinned like one (strokeRecovery.js), so
+  // the point count stays what the editor and the record are used to
+  const pts = simplifyRDP(curveToPolyline(curve, CURVE_STEP_EM * upem), CURVE_RDP_EM * upem).map((p) => [round2(p[0]), round2(p[1])]);
+  if (s.widthEdits) {
+    const edits = {};
+    for (const [k, w] of Object.entries(s.widthEdits)) {
+      const q = old[Number(k)];
+      if (!q) continue;
+      let best = 0, bd = Infinity;
+      pts.forEach((p, j) => { const d = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2; if (d < bd) { bd = d; best = j; } });
+      edits[best] = w;
+    }
+    s.widthEdits = Object.keys(edits).length ? edits : undefined;
+  }
+  s.points = pts;
+  s.curve = curve.map((a) => ({ p: [round2(a.p[0]), round2(a.p[1])], in: a.in ? [round2(a.in[0]), round2(a.in[1])] : null, out: a.out ? [round2(a.out[0]), round2(a.out[1])] : null }));
+  s.lengthFontUnits = round2(polylineLength(pts));
+  return true;
 }
 
 function round2(v) {

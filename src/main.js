@@ -21,7 +21,9 @@ import {
   dragPoint,
   deletePoint,
   snapStrokeRange,
-  refreshWidths, setPointWidth } from './lib/edit.js';
+  refreshWidths, setPointWidth,
+  strokeCurve, moveCurveHandle
+} from './lib/edit.js';
 import { StrokeStore } from './lib/cache.js';
 import { RECORD_VERSION } from './lib/strokeRecovery.js';
 import { renderDebugView, hitTestStroke } from './render/debugView.js';
@@ -73,6 +75,7 @@ const el = {
   resetGlyph: $('resetGlyph'),
   deselect: $('deselect'),
   drawMode: $('drawMode'),
+  curveMode: $('curveMode'),
   snapInk: $('snapInk'),
   anim: $('anim'),
   playpause: $('playpause'),
@@ -153,6 +156,8 @@ let pan = null;         // {last} while the view is being dragged
 let drawing = null;     // {pts: [[cssX, cssY], ...]} while a path is being drawn
 let drag = null;        // {pointIndex, base, lo, hi} while a vertex is being dragged
 let selectedPoint = null; // index of the highlighted point of the selected stroke
+let curveModeOn = false;  // the selected stroke is edited by Bézier anchors and handles
+let selectedHandle = null; // {anchor, which} last picked in curve mode
 let pointerDown = null; // {at, moved} to tell a click from a drag
 
 animator.onProgress = (f, playing) => {
@@ -606,6 +611,7 @@ function paintDebug() {
     showNodes: el.nodes.checked,
     highlight: selection ? { ...selection, pointIndex: selectedPoint ?? selection.pointIndex } : null,
     view,
+    curve: curveOption(),
   });
   window.__debugLayout = debugLayout; // handy from the console while tuning
 }
@@ -884,6 +890,60 @@ function setDrawMode(on) {
 }
 
 el.drawMode.addEventListener('click', () => setDrawMode(!drawModeOn));
+
+/* ------------------------------------------------------- curve handles -- */
+
+function setCurveMode(on) {
+  curveModeOn = on;
+  el.curveMode.classList.toggle('active', on);
+  try { localStorage.setItem('handwriter.curveMode', on ? '1' : '0'); } catch { /* storage may be off */ }
+  if (!on) selectedHandle = null;
+  if (analysis) paintDebug();
+}
+el.curveMode.addEventListener('click', () => setCurveMode(!curveModeOn));
+try { if (localStorage.getItem('handwriter.curveMode') === '1') setCurveMode(true); } catch { /* storage may be off */ }
+
+/** The selected stroke's curve in word units, for the debug view; null unless curve mode is on. */
+function curveOption() {
+  if (!curveModeOn || !selection || !analysis) return null;
+  const g = analysis.glyphs[selection.glyphIndex];
+  const anchors = drag?.curve || strokeCurve(g.record, selection.strokeIndex);
+  if (!anchors) return null;
+  const off = (q) => (q ? [q[0] + g.x, q[1] + g.y] : null);
+  return {
+    anchors: anchors.map((a) => ({ p: off(a.p), in: off(a.in), out: off(a.out) })),
+    active: drag?.curve ? { anchor: drag.anchor, which: drag.which } : selectedHandle,
+  };
+}
+
+/** The anchor or handle of the selected stroke's curve nearest `at` (CSS px), handles before anchors. */
+function nearestHandle(sel, anchors, at, maxDist) {
+  const L = debugLayout;
+  const g = analysis.glyphs[sel.glyphIndex];
+  let best = null, bestD = maxDist * maxDist;
+  anchors.forEach((a, i) => {
+    for (const which of ['in', 'out', 'p']) {
+      const q = a[which];
+      if (!q) continue;
+      const cx = L.originX + (g.x + q[0]) * L.s;
+      const cy = L.baselineY - (g.y + q[1]) * L.s;
+      const d = (cx - at[0]) ** 2 + (cy - at[1]) ** 2;
+      // a handle sitting on its anchor: the anchor wins only if nothing closer
+      if (d < bestD || (d === bestD && which === 'p' && best && best.anchor === i)) { bestD = d; best = { anchor: i, which }; }
+    }
+  });
+  return best;
+}
+
+/** The index of the stroke's point nearest a curve anchor (what the width keys and the split act on). */
+function pointNearAnchor(sel, anchor) {
+  const g = analysis.glyphs[sel.glyphIndex];
+  const s = g.record.strokes[sel.strokeIndex];
+  let best = 0, bd = Infinity;
+  s.points.forEach((p, i) => { const d = (p[0] - anchor.p[0]) ** 2 + (p[1] - anchor.p[1]) ** 2; if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+window.__curve = { strokeCurve, moveCurveHandle, get mode() { return curveModeOn; }, set mode(v) { setCurveMode(!!v); } };
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && drawModeOn) setDrawMode(false);
 });
@@ -970,7 +1030,17 @@ el.debug.addEventListener('pointerdown', (e) => {
   const at = canvasPoint(e);
   if (drawModeOn) { drawing = { pts: [at] }; return; }
   pointerDown = { at, moved: false };
-  if (selection) {
+  if (selection && curveModeOn) {
+    const g = analysis.glyphs[selection.glyphIndex];
+    const anchors = strokeCurve(g.record, selection.strokeIndex);
+    const hit = anchors && nearestHandle(selection, anchors, at, 10);
+    if (hit) {
+      selectedHandle = hit;
+      selectedPoint = pointNearAnchor(selection, anchors[hit.anchor]);
+      drag = { curve: anchors, anchor: hit.anchor, which: hit.which, pointIndex: selectedPoint, lo: 0, hi: 0 };
+      updateEditor();
+    }
+  } else if (selection) {
     const hit = nearestVertex(selection, at, 9);
     if (hit != null) {
       const s = analysis.glyphs[selection.glyphIndex].record.strokes[selection.strokeIndex];
@@ -1002,10 +1072,15 @@ el.debug.addEventListener('pointermove', (e) => {
     // the pointer in the glyph's own units, so the point lands under it
     const x = (at[0] - debugLayout.originX) / debugLayout.s - g.x;
     const y = (debugLayout.baselineY - at[1]) / debugLayout.s - g.y;
-    // shift moves the single point; otherwise the curve either side follows it
-    const radius = e.shiftKey ? 0 : g.record.unitsPerEm * 0.12;
-    const range = dragPoint(g.record, selection.strokeIndex, drag.pointIndex, drag.base, x, y, radius);
-    if (range) { drag.lo = Math.min(drag.lo, range[0]); drag.hi = Math.max(drag.hi, range[1]); }
+    if (drag.curve) {
+      // an anchor brings its handles; a handle keeps its partner in line unless alt breaks it
+      moveCurveHandle(g.record, selection.strokeIndex, drag.curve, drag.anchor, drag.which, x, y, { free: e.altKey });
+    } else {
+      // shift moves the single point; otherwise the curve either side follows it
+      const radius = e.shiftKey ? 0 : g.record.unitsPerEm * 0.12;
+      const range = dragPoint(g.record, selection.strokeIndex, drag.pointIndex, drag.base, x, y, radius);
+      if (range) { drag.lo = Math.min(drag.lo, range[0]); drag.hi = Math.max(drag.hi, range[1]); }
+    }
     pointerDown.moved = true;
     // redraw from the record as it is now - the plan keeps its own copy of
     // the path, so rebuild this one stroke's and the drag shows under the mouse
@@ -1034,6 +1109,7 @@ el.debug.addEventListener('pointerup', (e) => {
   if (drag && pointerDown?.moved) {
     // no snapping: a dragged point stays where it was dropped. Snap to ink is
     // for a freshly drawn path, which is meant to find the ink's centre.
+    if (drag.curve) selectedPoint = pointNearAnchor(selection, drag.curve[drag.anchor]);
     drag = null;
     pointerDown = null;
     commitRecordEdit(selection.glyphIndex);
@@ -1043,9 +1119,12 @@ el.debug.addEventListener('pointerup', (e) => {
   pan = null;
   if (pointerDown && !pointerDown.moved) {
     const [x, y] = canvasPoint(e);
-    const onPoint = selection ? nearestVertex(selection, [x, y], 9) : null;
+    const onPoint = selection && !curveModeOn ? nearestVertex(selection, [x, y], 9) : null;
     if (onPoint != null) selectedPoint = onPoint; // a click on a point picks it
-    else {
+    else if (selection && curveModeOn && selectedHandle && drag === null && nearestHandle(selection, strokeCurve(analysis.glyphs[selection.glyphIndex].record, selection.strokeIndex), [x, y], 10)) {
+      // a click on a handle picked it on pointerdown
+    } else {
+      selectedHandle = null;
       selection = hitTestStroke(debugLayout, analysis, x, y);
       selectedPoint = null;
     }
@@ -1111,6 +1190,7 @@ el.reverseStroke.addEventListener('click', () => {
   if (!selection) return;
   const g = analysis.glyphs[selection.glyphIndex];
   g.record.strokes[selection.strokeIndex].points.reverse();
+  delete g.record.strokes[selection.strokeIndex].curve;
   if (selection.pointIndex != null) {
     selection.pointIndex = g.record.strokes[selection.strokeIndex].points.length - 1 - selection.pointIndex;
   }

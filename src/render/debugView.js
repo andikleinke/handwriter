@@ -17,6 +17,7 @@ export function renderDebugView(canvas, analysis, options = {}) {
     showNodes = true,
     highlight = null, // {glyphIndex, strokeIndex, pointIndex?} or null
     view = null,      // {zoom, panX, panY} shared with the animation
+    curve = null,     // {anchors (word units), active: {anchor, which} | null} for the selected stroke
   } = options;
 
   const cssWidth = canvas.clientWidth || 900;
@@ -123,8 +124,9 @@ export function renderDebugView(canvas, analysis, options = {}) {
 
     if (showNumbers) drawBadge(ctx, path[0], it.n, color, dim);
 
-    // the selected stroke shows its vertices: they can be dragged
-    if (selected) {
+    // the selected stroke shows its vertices: they can be dragged - or, with
+    // curve handles on, its anchors and handles
+    if (selected && !curve) {
       ctx.save();
       ctx.fillStyle = '#fff';
       ctx.strokeStyle = color;
@@ -137,6 +139,7 @@ export function renderDebugView(canvas, analysis, options = {}) {
       }
       ctx.restore();
     }
+    if (selected && curve) drawCurveHandles(ctx, curve, css, color);
 
     if (
       selected &&
@@ -325,5 +328,39 @@ function drawBadge(ctx, at, n, color, dim) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(String(n), at[0], at[1] + 0.5);
+  ctx.restore();
+}
+
+/** Anchors as squares, handles as knobs on thin lines; the active one filled. */
+function drawCurveHandles(ctx, curve, css, color) {
+  const { anchors, active } = curve;
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = color;
+  for (const a of anchors) {
+    const p = css(a.p);
+    for (const h of [a.in, a.out]) {
+      if (!h) continue;
+      const q = css(h);
+      ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+    }
+  }
+  anchors.forEach((a, i) => {
+    for (const which of ['in', 'out']) {
+      const h = a[which];
+      if (!h) continue;
+      const q = css(h);
+      const on = active && active.anchor === i && active.which === which;
+      ctx.beginPath(); ctx.arc(q[0], q[1], on ? 4.5 : 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = on ? color : '#fff'; ctx.fill();
+      ctx.lineWidth = 1.2; ctx.strokeStyle = color; ctx.stroke();
+    }
+    const p = css(a.p);
+    const on = active && active.anchor === i && active.which === 'p';
+    const r = on ? 5 : 3.6;
+    ctx.beginPath(); ctx.rect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+    ctx.fillStyle = on ? color : '#fff'; ctx.fill();
+    ctx.lineWidth = 1.4; ctx.strokeStyle = color; ctx.stroke();
+  });
   ctx.restore();
 }
