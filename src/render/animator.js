@@ -554,7 +554,7 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /** Write the per-pixel alpha for the chains' current progress. */
 function revealLayer(layer, map, prog, done, featherUnits) {
-  const { chain, s, domain } = map;
+  const { chain, s, domain, cover, chain2, s2 } = map;
   const d = layer.img.data;
   for (let q = 0; q < domain.length; q++) {
     const i = domain[q];
@@ -571,6 +571,13 @@ function revealLayer(layer, map, prog, done, featherUnits) {
       else {
         const f = (p - s[i]) / featherUnits + 1;
         a = f <= 0 ? 0 : f >= 1 ? 255 : (f * 255) | 0;
+      }
+      // a pixel on the edge of its owner's band, with another pass's ink
+      // beyond it: shown by the fraction the band covers until that pass
+      // completes it (the junction's edge lands between the pixels)
+      if (a > cover[i] && chain2[i] >= 0 && !done) {
+        const p2 = prog[chain2[i]];
+        if (p2 !== Infinity && (p2 === -Infinity || p2 < s2[i])) a = cover[i];
       }
     }
     d[i * 4 + 3] = a;

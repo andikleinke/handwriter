@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.20.0",
+    "tag": "v0.20.0",
+    "date": "2026-10-17",
+    "note": "v0.20.0 — junctions: a stroke keeps its line and its width through a crossing, to the half-pixel; a pointed pen's hairline stays thin inside a shade"
+  },
+  {
     "version": "0.19.0",
     "tag": "v0.19.0",
     "date": "2026-10-17",

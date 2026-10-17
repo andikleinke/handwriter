@@ -35,7 +35,11 @@ export const NIB_MIN_EM = 0.08;     // the nib's radius is read from the ink ove
 export const NIB_PERCENTILE = 0.75; // ...at this percentile of it: a crossing's swell is outvoted, a shade's own is not
 export const CROSS_CAP = 1.8;       // how far past that radius the measured cross-section may reach
 export const CROSS_SLEW = 0.35;     // ...and how fast it may widen along the path (font units per unit travelled)
+export const JUNCTION_MAX_EM = 0.3;  // a crossing this short is redrawn straight through; longer is a retrace
+export const JUNCTION_NEAR_EM = 0.15; // this far into a retrace the pen still has the width it arrived with
+export const THIN_IN_THICK = 0.6;    // a pen entering a junction thinner than this fraction of the nib radius there is a hairline inside a shade
 export const NIB_SLACK_PX = 1.0;    // the nib reaches this far past the measured half-width
+export const PASS_GAP_EM = 0.08;    // arc length that separates two passes of one chain over the same ink
 export const EDGE_RING_PX = 2;      // background this close to ink joins the map (the outline clips it)
 export const HIDDEN = -2;           // chain id of ink that is never shown (an untravelled tail at a join)
 export const BLEND_EM = 0.08;       // how far the join ribbon runs into each letter
@@ -52,7 +56,7 @@ export function buildRevealMaps(analysis, chains, upem) {
   if (!Number.isFinite(scaleMin)) return { glyphs: [], unassigned: 0 };
   const step = 1 / scaleMin; // one raster pixel, in font units
   const sampled = chains.map((c) => sampleChain(c, step, glyphs, upem));
-  capWidthsAtJunctions(sampled, step, upem);
+  capWidthsAtJunctions(sampled, step, upem, glyphs);
   const out = [];
   let unassigned = 0;
   glyphs.forEach((g, gi) => {
@@ -121,6 +125,8 @@ function sampleChain(chain, step, glyphs, upem) {
   // nearest, which at a crossing is the one still to come.
   const halfL = new Float32Array(n);
   const halfR = new Float32Array(n);
+  const edge = new Uint8Array(2 * n); // [left, right]: did the reading end at background?
+  const hit = { edge: false };
   const tan = new Float32Array(2 * n);
   for (let k = 0; k < n; k++) {
     const a = pts[Math.max(0, k - 1)], b = pts[Math.min(n - 1, k + 1)];
@@ -130,8 +136,10 @@ function sampleChain(chain, step, glyphs, upem) {
     tan[2 * k + 1] = dy / l;
     const nx = -dy / l, ny = dx / l;
     const cap = Math.max(R[k] * CROSS_CAP, R[k] + 1 / (glyphs[0]?.raster?.scale || 1));
-    halfL[k] = reachAcross(glyphs, pts[k], nx, ny, cap, R[k]);
-    halfR[k] = reachAcross(glyphs, pts[k], -nx, -ny, cap, R[k]);
+    halfL[k] = reachAcross(glyphs, pts[k], nx, ny, cap, R[k], hit);
+    edge[2 * k] = hit.edge ? 1 : 0;
+    halfR[k] = reachAcross(glyphs, pts[k], -nx, -ny, cap, R[k], hit);
+    edge[2 * k + 1] = hit.edge ? 1 : 0;
   }
   // A pen widens as it is pressed, not in one step. Where the path runs into
   // ink that is locally thick for a reason of its own - a join landing in the
@@ -142,42 +150,56 @@ function sampleChain(chain, step, glyphs, upem) {
   // shade untouched (it takes a fifth of an em) and clips the jump.
   slewLimit(halfL, s, CROSS_SLEW);
   slewLimit(halfR, s, CROSS_SLEW);
-  return { pts, s, R, n, item, halfL, halfR, tan };
+  return { pts, s, R, n, item, halfL, halfR, tan, edge };
 }
 
 /**
- * Through a junction a stroke keeps the width it arrived with.
+ * Through a junction a stroke keeps the width it arrived with, and its line.
  *
- * The cross-section is measured perpendicular to the path, out to the ink's
- * edge or to the valley between two cores. Where two strokes cross at a
- * shallow angle there is no valley - their edges simply merge - and the
- * measurement runs on into the other stroke. That was the square nub on the
- * `L` and `J`: 356 of 358 pixels of the stem shown during the bowl were
- * claimed by the bowl's band where `hr` had grown to 13.8 px against a nib
- * radius of 10.
+ * A pen does not change because another stroke is near: eight pixels wide
+ * going into a crossing and eight coming out, it is eight pixels wide all the
+ * way through. The measurements say otherwise on both counts. The
+ * cross-section is read perpendicular to the path, out to the ink's edge or
+ * to the valley between two cores; where two strokes meet at a shallow angle
+ * there is no valley and the reading runs on into the other stroke (the
+ * square nub on the `L`: 356 of 358 pixels of the stem shown during the
+ * bowl), and where the valley is sharp the reading falls short of the
+ * stroke's own edge (the notch in the `J`'s stem where the loop crosses: the
+ * facing half-width dropped from 11 to 7 px). And the path itself swerves:
+ * the skeleton of two merged strokes bends toward their union, so the band
+ * tilts through the crossing, bulging on one side and leaving a step on the
+ * other.
  *
- * Holding the band to the nib radius there removed the nub, and starved every
- * shaded stroke that crosses another: a pointed pen's shade is wider than the
- * circle inscribed in it, so the `z` and `b` lost ink at their crossings and
- * it came back late. The right bound is the stroke's own width as it enters
- * the junction - the pen does not change width because another stroke is
- * near - taken as the median over a short run of clean samples just before
- * the junction stretch (after it, for a stretch at the start of a chain), and
- * never less than the nib radius. Inside the stretch the measured width may
- * fall below that (a taper), never exceed it.
- *
- * Only the side that faces the other stroke. The inflation is one-sided -
- * on the `L` it was `hr` that grew while `hl` never moved - and a shade
- * swells through a crossing on its own convex side, which is a real width,
- * not a measurement running into something. Capping both sides starved the
- * `z` and `b` at their crossings; capping the facing side leaves the swell.
+ * So a short junction stretch - a crossing, up to JUNCTION_MAX_EM of path -
+ * is redrawn from its clean approach and departure: the centreline follows a
+ * Hermite curve from the last clean sample before to the first after, with
+ * the tangents the pen had there, and each half-width runs linearly from the
+ * median it had just before to the median just after. On the side that faces
+ * the other stroke that replaces the measurement, and the band stops half a
+ * pixel inside it rather than the nib's usual pixel beyond (a measured
+ * half-width runs to the first background pixel; claiming past it bit a
+ * pixel or two out of the other stroke, the serrated lip under the `J`'s
+ * bar) - except for pixels on the ink's own free edge, which are claimed to
+ * the full reach, since nothing but background lies beyond them. On the
+ * other side the measurement may still exceed it, provided the reading ran
+ * out to background: a shade swells through a crossing on its own convex
+ * side, and that is real width. A reading cut short inside other ink is
+ * not - a hairline entering the `e`'s shade from below read the shade's
+ * width on its far side and ended in a knob. The centreline
+ * is redrawn only for a short stretch, and only if the new one lies on ink
+ * throughout; a long stretch (a retrace running beside itself for hundreds
+ * of units, where no chord describes the path) keeps its measured line, but
+ * its widths follow the same rule - the `J`'s bar, retraced, had read 4.5 px
+ * where it passed over the stem and left a ragged lip there until the return
+ * pass. Never less than the nib radius, which is the one measurement a
+ * crossing cannot inflate.
  *
  * "Another pass" is another chain, or the same chain far enough along to be
  * the stroke crossing itself; neighbouring samples are always within reach
  * and do not count. The reach is generous - half as much again as the two
  * half-widths - because edges merge well before centrelines meet.
  */
-function capWidthsAtJunctions(sampled, step, upem) {
+function capWidthsAtJunctions(sampled, step, upem, glyphs) {
   const margin = 2 * step;
   const minGap = 0.12 * upem;
   let cell = margin;
@@ -191,6 +213,18 @@ function capWidthsAtJunctions(sampled, step, upem) {
       if (b) b.push(ci, k); else grid.set(key, [ci, k]);
     }
   });
+  const onInk = (p) => {
+    for (const g of glyphs) {
+      const r = g.raster;
+      if (!r) continue;
+      const [x, y] = fontToRaster(r, p[0] - g.x, p[1] - g.y);
+      const xi = Math.round(x), yi = Math.round(y);
+      if (xi < 0 || yi < 0 || xi >= r.width || yi >= r.height) continue;
+      if (inkInfo(r).dist[yi * r.width + xi] > 0) return true;
+    }
+    return false;
+  };
+  const pointed = glyphs.some((g) => g.record?.stats?.hand?.pointed);
   sampled.forEach((sc, ci) => {
     // which side of the path the other pass lies on, per sample
     const sides = [new Uint8Array(sc.n), new Uint8Array(sc.n)]; // [left, right]
@@ -211,45 +245,157 @@ function capWidthsAtJunctions(sampled, step, upem) {
             const dx = o.pts[j][0] - x, dy = o.pts[j][1] - y;
             const limit = 1.5 * (reach + Math.max(o.halfL[j], o.halfR[j])) + margin;
             if (dx * dx + dy * dy >= limit * limit) continue;
-            // the normal (-ty, tx) points to the left of travel
-            const across = dx * -ty + dy * tx;
-            sides[across >= 0 ? 0 : 1][k] = 1;
             junction[k] = 1;
+            // a side faces the other pass only if this sample's reading on
+            // that side runs across the other pass's centreline: the ink out
+            // there is the other stroke's. The normal (-ty, tx) points left.
+            const along = dx * tx + dy * ty, across = dx * -ty + dy * tx;
+            if (Math.abs(along) > margin) continue;
+            if (across >= 0 && across <= sc.halfL[k] + step) sides[0][k] = 1;
+            if (across <= 0 && -across <= sc.halfR[k] + step) sides[1][k] = 1;
           }
         }
       }
     }
     sc.junction = junction;
-    // the width the pen brought into each junction stretch
+    // per sample, [left, right]: is there ink beyond the band's edge on that
+    // side (so the band should stop short of it)? Outside a junction stretch
+    // that is simply a reading that never reached background.
+    const facing = new Uint8Array(2 * sc.n);
+    for (let k = 0; k < 2 * sc.n; k++) facing[k] = sc.edge[k] ? 0 : 1;
+    sc.facing = facing;
+    const halves = [sc.halfL, sc.halfR];
+    // what the pen brought into a stretch (dir -1 from just before it) or
+    // took out of it (dir +1 from just after): the median half-width over a
+    // short run of clean samples, and the mean tangent there
     const window = 0.08 * upem;
-    const entering = (half, from, dir) => {
-      const vals = [];
-      const flagged = half === sc.halfL ? sides[0] : sides[1];
+    const clean = (from, dir) => {
+      const vals = [[], []];
+      let tx = 0, ty = 0;
       for (let i = from; i >= 0 && i < sc.n && Math.abs(sc.s[i] - sc.s[from]) <= window; i += dir) {
-        if (flagged[i]) break;
-        vals.push(half[i]);
+        if (junction[i]) break;
+        // a turn ends the run: past it the pen is on another stroke
+        if (sc.tan[2 * i] * sc.tan[2 * from] + sc.tan[2 * i + 1] * sc.tan[2 * from + 1] < 0.5) break;
+        vals[0].push(sc.halfL[i]);
+        vals[1].push(sc.halfR[i]);
+        tx += sc.tan[2 * i]; ty += sc.tan[2 * i + 1];
       }
-      if (!vals.length) return null;
+      // a run shorter than half the window (the tip of a hairpin) is no measure
+      if (vals[0].length * step < window / 2) return null;
+      const l = Math.hypot(tx, ty) || 1;
+      return { half: vals.map((v) => { v.sort((p, q) => p - q); return v[v.length >> 1]; }), tan: [tx / l, ty / l] };
+    };
+    const hermite = (p0, t0, p1, t1, t) => {
+      const L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+      const h00 = (1 + 2 * t) * (1 - t) * (1 - t), h10 = t * (1 - t) * (1 - t);
+      const h01 = t * t * (3 - 2 * t), h11 = t * t * (t - 1);
+      return [
+        h00 * p0[0] + h10 * L * t0[0] + h01 * p1[0] + h11 * L * t1[0],
+        h00 * p0[1] + h10 * L * t0[1] + h01 * p1[1] + h11 * L * t1[1],
+      ];
+    };
+    // the measurements as taken, before any stretch is rewritten
+    const raw = [Float32Array.from(sc.halfL), Float32Array.from(sc.halfR)];
+    sc.raw = raw; sc.sides = sides; // for inspection
+    const win = Math.max(1, Math.round(window / step));
+    const medianOf = (side, i, k, e) => {
+      const vals = [];
+      for (let j = Math.max(k, i - win); j <= Math.min(e, i + win); j++) vals.push(raw[side][j]);
       vals.sort((p, q) => p - q);
       return vals[vals.length >> 1];
     };
-    [sc.halfL, sc.halfR].forEach((half, side) => {
-      const flagged = sides[side];
-      let k = 0;
-      while (k < sc.n) {
-        if (!flagged[k]) { k++; continue; }
-        let e = k;
-        while (e + 1 < sc.n && flagged[e + 1]) e++;
-        const before = k > 0 ? entering(half, k - 1, -1) : null;
-        const after = e + 1 < sc.n ? entering(half, e + 1, 1) : null;
-        const own = before ?? after;
-        for (let i = k; i <= e; i++) {
-          const cap = Math.max(sc.R[i], own ?? sc.R[i]);
-          half[i] = Math.min(half[i], cap);
-        }
-        k = e + 1;
+    // a stretch is cut where the pen turns back on itself (the foot of a
+    // retraced stem): the legs are different strokes, each with its own width
+    const turn = Math.max(2, Math.round((0.04 * upem) / step));
+    let k = 0;
+    while (k < sc.n) {
+      if (!junction[k]) { k++; continue; }
+      let e = k;
+      while (e + 1 < sc.n && junction[e + 1]) e++;
+      const legs = [];
+      let start = k;
+      for (let i = k + turn; i <= e; i++) {
+        if (sc.tan[2 * i] * sc.tan[2 * (i - turn)] + sc.tan[2 * i + 1] * sc.tan[2 * (i - turn) + 1] >= 0) continue;
+        const cut = i - (turn >> 1);
+        if (cut > start) { legs.push([start, cut - 1]); start = cut; i = cut + turn; }
       }
-    });
+      legs.push([start, e]);
+      for (const [a, b] of legs) {
+        const before = a === k && k > 0 ? clean(k - 1, -1) : null;
+        const after = b === e && e + 1 < sc.n ? clean(e + 1, 1) : null;
+        const s0 = sc.s[a > 0 ? a - 1 : a], s1 = sc.s[b + 1 < sc.n ? b + 1 : b];
+        const short = before && after && sc.s[b] - sc.s[a] <= JUNCTION_MAX_EM * upem;
+        if (short) {
+          const p0 = sc.pts[a - 1], p1 = sc.pts[b + 1];
+          const fresh = [];
+          for (let i = a; i <= b; i++) {
+            const p = hermite(p0, before.tan, p1, after.tan, (sc.s[i] - s0) / (s1 - s0));
+            if (!onInk(p)) break;
+            fresh.push(p);
+          }
+          if (fresh.length === b - a + 1) {
+            for (let i = a; i <= b; i++) sc.pts[i] = fresh[i - a];
+            for (let i = Math.max(1, a - 1); i <= Math.min(sc.n - 2, b + 1); i++) {
+              const q0 = sc.pts[i - 1], q1 = sc.pts[i + 1];
+              const dx = q1[0] - q0[0], dy = q1[1] - q0[1];
+              const l = Math.hypot(dx, dy) || 1;
+              sc.tan[2 * i] = dx / l;
+              sc.tan[2 * i + 1] = dy / l;
+            }
+          }
+        }
+        halves.forEach((half, side) => {
+          for (let i = a; i <= b; i++) {
+            const w0 = before?.half[side], w1 = after?.half[side];
+            const other = sides[side][i], atEdge = sc.edge[2 * i + side], read = raw[side][i];
+            // how far this sample is from the leg's clean approach / departure
+            const dIn = before ? sc.s[i] - sc.s[a] : Infinity, dOut = after ? sc.s[b] - sc.s[i] : Infinity;
+            const near = short || Math.min(dIn, dOut) <= JUNCTION_NEAR_EM * upem;
+            // through a crossing: the width brought in, running to the width
+            // taken out; just inside a long stretch: the width brought in
+            const own = !near ? null : short ? w0 + (w1 - w0) * ((sc.s[i] - s0) / (s1 - s0 || 1)) : dIn <= dOut ? w0 : w1;
+            let v;
+            if (pointed && w0 !== undefined && w0 < THIN_IN_THICK * sc.R[i] && sc.tan[2 * i + 1] > -0.3) {
+              // a pointed pen's upstroke, come in far thinner than the ink here
+              // is thick: a hairline running inside a shade keeps its width -
+              // the ink around it is the shade's, drawn on its own pass. It
+              // stays thin through the turn at the top, however far that is;
+              // the shade begins as the pen heads down and presses
+              v = w0;
+            } else if (short) {
+              // through a crossing the pen keeps the width it brought - the
+              // readings there are of the union, and a reading that reaches
+              // background may have reached it through the other stroke's
+              // ink, in the hollow where the two outlines meet. The nib's
+              // radius is the floor: a pointed pen's shade often swells to its
+              // full width inside the join, and the radius follows that
+              v = Math.max(sc.R[i], own);
+            } else if (near) {
+              // just inside a long stretch: the width brought in, or this
+              // stroke's own free edge if it reads wider
+              v = Math.max(sc.R[i], other || !atEdge ? own : Math.max(read, own));
+            } else if (other || !atEdge) {
+              // deep in a retrace or a merge, with nothing clean to hold to: the
+              // reading, smoothed, and never less than the nib's own radius
+              v = Math.max(sc.R[i], medianOf(side, i, a, b));
+            } else {
+              v = read; // this stroke's own edge, however wide
+            }
+            // never past a reading that reached background: whatever lifted
+            // the width above it (the nib's radius, the width brought in) is
+            // an estimate, the background is a fact
+            half[i] = atEdge ? Math.min(v, read) : v;
+            // in a junction the band stops half a pixel inside its width on
+            // both sides instead of reaching a pixel past it: what lies past
+            // it may be the other stroke, even past a reading that found
+            // background (a one-pixel hollow where two outlines meet). Pixels
+            // on a real free edge are still claimed, by the band itself.
+            facing[2 * i + side] = 1;
+          }
+        });
+      }
+      k = e + 1;
+    }
   });
 }
 
@@ -281,9 +427,13 @@ function slewLimit(half, s, slew) {
  * other one. Stopping at that minimum takes the stroke's own half-width and
  * leaves the rest of the union to the pass it belongs to. Where there is no
  * crossing there is no minimum, and the march simply runs to the edge.
+ * `hit.edge`, if a holder is given, says whether it did: a reading that ended
+ * at background is this stroke's own edge; one cut short by a valley or the
+ * cap is a guess made inside other ink.
  */
-function reachAcross(glyphs, p, dx, dy, cap, R) {
+function reachAcross(glyphs, p, dx, dy, cap, R, hit) {
   let raster = null, best = -1;
+  if (hit) hit.edge = false;
   for (const g of glyphs) {
     const r = g.raster;
     if (!r) continue;
@@ -303,8 +453,8 @@ function reachAcross(glyphs, p, dx, dy, cap, R) {
   const capPx = cap * r.scale;
   for (let t = stepPx; t <= capPx; t += stepPx) {
     const xi = Math.round(x + ux * (t / stepPx)), yi = Math.round(y + uy * (t / stepPx));
-    if (xi < 0 || yi < 0 || xi >= r.width || yi >= r.height) return t / r.scale;
-    if (!r.fill[yi * r.width + xi]) return t / r.scale;
+    if (xi < 0 || yi < 0 || xi >= r.width || yi >= r.height) { if (hit) hit.edge = true; return t / r.scale; }
+    if (!r.fill[yi * r.width + xi]) { if (hit) hit.edge = true; return t / r.scale; }
     const d = info.dist[yi * r.width + xi];
     // a valley: the distance fell away from this core and has started to climb
     // toward another. Half a pixel of noise is not a valley.
@@ -403,6 +553,11 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
   // provenance, for inspection: 1 band, 2 disk, 4 nearest path, 5 wedge
   const prov = new Uint8Array(N);
   const claimS = new Float32Array(N); // the arc of the sample whose band or disk claimed it
+  // how much of the pixel its owner's band covers (255 = whole), and the
+  // later pass whose band covers it whole, which completes it
+  const cover = new Uint8Array(N).fill(255);
+  const chain2 = new Int16Array(N).fill(-1);
+  const s2 = new Float32Array(N);
   const stamp = new Int32Array(N);
   const queue = new Int32Array(N);
   const used = new Set();
@@ -440,7 +595,12 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
    * of units of arc later - collected them, which is what broke the stroke
    * into a comb of fragments as it was revealed.
    */
-  const band = (x, y, tx, ty, hl, hr, along, mode, ci, sk, plane) => {
+  // the pixel one step from (px, py) in a direction, clamped to the raster
+  const idx = (fx, fy) => {
+    const qx = Math.min(w - 1, Math.max(0, Math.round(fx))), qy = Math.min(h - 1, Math.max(0, Math.round(fy)));
+    return qy * w + qx;
+  };
+  const band = (x, y, tx, ty, hl, hr, along, mode, ci, sk, plane, faceL = 0, faceR = 0) => {
     const reach = Math.max(hl, hr, along) + 2;
     if (x < -reach || y < -reach || x > w - 1 + reach || y > h - 1 + reach) return;
     const seed = seedPixel(dom, w, h, Math.round(x), Math.round(y));
@@ -457,8 +617,30 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
       const alongHere = (px - x) * tx + (py - y) * ty;
       const acrossI = (px - x) * -ty + (py - y) * tx;
       // inside the band itself? (the fill travels wider than it claims)
-      const inBand = Math.abs(alongHere) <= along
-        && acrossI <= hl + NIB_SLACK_PX && -acrossI <= hr + NIB_SLACK_PX;
+      // inside the band itself? On a side that faces another pass the band
+      // stops short of its measured half-width - unless the pixel is on the
+      // ink's own edge, with background beyond it, which is this stroke's and
+      // nobody else's (the outline clips whatever is claimed past it)
+      // On a side that faces another pass the band's edge is the width
+      // itself, not the nib's slack past it, and a pixel straddling that
+      // edge is claimed with the fraction of it the band covers (`cov`) -
+      // the reveal draws it that much until the pass beyond completes it.
+      // A pixel on the ink's own edge, with background beyond, is claimed
+      // whole to the full reach: it is this stroke's and nobody else's (the
+      // outline clips whatever is claimed past it).
+      let inBand = Math.abs(alongHere) <= along;
+      let cov = 255;
+      if (inBand) {
+        const left = acrossI >= 0;
+        const a = left ? acrossI : -acrossI, h = left ? hl : hr, face = left ? faceL : faceR;
+        if (!face) inBand = a <= h;
+        else if (a <= h && !fill[left ? idx(px - ty, py + tx) : idx(px + ty, py - tx)]) inBand = true;
+        else {
+          const part = h - NIB_SLACK_PX - a + 0.5; // 1 fully inside the edge, 0 fully outside
+          inBand = part > 0.02;
+          if (part < 1) cov = Math.round(part * 255);
+        }
+      }
       if (!inBand) { /* travelled through, not claimed */ }
       else if (mode === 'hide') {
         if (beyond && (c === -1 || c === ci)) chain[i] = HIDDEN;
@@ -466,7 +648,13 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
         chain[i] = ci;
         sArc[i] = sk + alongHere / r.scale;
         prov[i] = 1; claimS[i] = sk;
+        cover[i] = cov;
         used.add(ci);
+      } else if (beyond && c >= 0 && cov === 255 && chain2[i] === -1 && (c !== ci || sk - claimS[i] > PASS_GAP_EM * upem)) {
+        // a later pass covering the pixel whole: it completes whatever
+        // fraction the first owner showed of it
+        chain2[i] = ci;
+        s2[i] = sk + alongHere / r.scale;
       }
       const acrossHere = Math.abs((px - x) * -ty + (py - y) * tx);
       for (let dy = -1; dy <= 1; dy++) {
@@ -514,7 +702,11 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
         chain[i] = ci;
         sArc[i] = sk;
         prov[i] = 2; claimS[i] = sk;
+        cover[i] = 255;
         used.add(ci);
+      } else if (beyond && c >= 0 && chain2[i] === -1 && (c !== ci || sk - claimS[i] > PASS_GAP_EM * upem)) {
+        chain2[i] = ci;
+        s2[i] = sk;
       }
       for (let dy = -1; dy <= 1; dy++) {
         const ny = py + dy;
@@ -652,8 +844,8 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
         const tx = sc.tan[2 * k], ty = -sc.tan[2 * k + 1];
         // half the sample spacing either way, so consecutive bands tile
         const spacing = (sc.s[1] - sc.s[0]) * r.scale;
-        band(x, y, tx, ty, sc.halfL[k] * r.scale, sc.halfR[k] * r.scale,
-          spacing * 0.75 + 1, mode, ci, sc.s[k], plane);
+        band(x, y, tx, ty, sc.halfL[k] * r.scale + NIB_SLACK_PX, sc.halfR[k] * r.scale + NIB_SLACK_PX,
+          spacing * 0.75 + 1, mode, ci, sc.s[k], plane, sc.facing[2 * k], sc.facing[2 * k + 1]);
       }
     }
   }
@@ -773,7 +965,7 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
   const CR = 8, CR2 = CR * CR;
   const WEDGE_SLACK_PX = 1.5;
   const timeOf = (c, s) => c * 1e7 + s;
-  const passGap = 0.08 * upem; // arc length that separates two passes of one chain
+  const passGap = PASS_GAP_EM * upem;
   for (const i of corners) {
     if (chain[i] < 0) continue;
     const px = i % w, py = (i - px) / w;
@@ -811,5 +1003,5 @@ function buildGlyphMap(g, gi, chains, sampled, upem) {
   const domain = new Int32Array(count);
   for (let i = 0, q = 0; i < N; i++) if (dom[i]) domain[q++] = i;
 
-  return { w, h, chain, s: sArc, domain, chainsUsed: [...used].sort((a, b) => a - b), unassigned, hidden, prov, claimS };
+  return { w, h, chain, s: sArc, domain, chainsUsed: [...used].sort((a, b) => a - b), unassigned, hidden, prov, claimS, cover, chain2, s2 };
 }

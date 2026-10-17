@@ -693,6 +693,43 @@ glyph instead, and `src/render/animator.js` plays it:
   run of clean samples just before it, never below the nib radius. The other
   side keeps its measured width, which is what lets a shade swell through a
   crossing; capping both sides starved the `z` and `b`.
+- **Through a crossing a stroke keeps its line and its width, on both sides,
+  to the half-pixel (v0.20.0).** v0.19.0's cap could only ever narrow a
+  band, and the `J` showed what that left: at the loop crossing the
+  skeleton's centreline *swerved* toward the union and the facing
+  half-width fell from 11 to 7 px (a notch); over the stem the retraced
+  bar read 4.5 px where a false valley cut it (a ragged lip); and the nib's
+  one-pixel slack past every measured edge bit into whatever stroke lay
+  beyond (a serration). The rule now, per junction stretch:
+  - a *short* stretch with a clean approach and departure (a crossing, up
+    to 0.3 em) is redrawn as a Hermite curve between them, with the pen's
+    tangents there, and its width runs linearly from the width brought in
+    to the width taken out - never below the nib radius, which is the one
+    reading a crossing cannot deflate (the `J`'s stem: 21-22 px on every
+    row through the crossing, measured, against 20-25 before);
+  - a *long* stretch (a retrace running beside itself) keeps the entering
+    width for 0.15 em, then the smoothed reading, floored at the nib
+    radius; the stretch is cut where the pen turns back on itself, since
+    the legs are different strokes, and a reading that reached background
+    is never exceeded (the background is a fact, the rest an estimate);
+  - a pointed pen's upstroke that came in far thinner than the ink around
+    it is a hairline inside a shade: it keeps its entering width all the
+    way up, and the shade is revealed on its own pass, which is what the
+    `e`'s and `u`'s smudges had been asking for;
+  - which side *faces* the other pass is decided geometrically - the
+    other pass's centreline lies within this sample's reading on that
+    side - not by which side a sample happens to lie on;
+  - in a junction the band stops at its width, not the slack past it, and
+    a pixel straddling that edge is claimed with the fraction the band
+    covers and shown that much until the pass beyond completes it (the
+    map carries a second owner per pixel), so a junction's edge lands
+    between the pixels instead of on one. `scripts/inspect.js` has the
+    helpers this was measured with.
+  Late ink (pixels under a band that show more than 0.15 em later), same
+  session, v0.19.0 → v0.20.0: Autography `J` 53 → 1, `L` 15 → 0, `t` 80 →
+  40, "hello" 357 → 314, "Kleinke" 652 → 450; Pinyon `z` 346 → 165, `b` 33
+  → 28, `o` 50 → 28, "hello" 628 → 392, "Kleinke" 2115 → 1659, "quick fox"
+  1358 → 637.
 - **Leftover ink joins the nearest path, not the nearest claimed pixel.**
   Ink no nib reached used to join whichever claimed pixel was nearest, which
   beside a wide claim is that claim whatever stroke the ink lies on. It now
@@ -1039,9 +1076,10 @@ script and is never edited by hand.
   other - a very shallow crossing - the nib can still follow the union and
   sweep a little of the stroke still to come.
 - **Where a stroke runs alongside its own later pass the seam is ragged.**
-  (Still true after v0.19.0, which fixed junctions where strokes *cross*:
-  the `o`'s seam measures 305 neighbouring-pixel arc jumps against 230
-  before, and nothing else moved.)
+  (Still true after v0.19.0 and v0.20.0, which fixed junctions where
+  strokes *cross*; the `o` itself improved a little under v0.20.0's smoothed
+  retrace widths, 50 → 28 late pixels, but the seam is still decided pixel
+  by pixel.)
   The right side of an `o` is written twice: the bowl closes over it, and the
   exit swirl retraces it about 1200 units of arc later. Both passes have a
   claim on the overlap - the earlier takes what its own cross-section covers,
