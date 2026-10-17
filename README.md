@@ -982,7 +982,7 @@ script and is never edited by hand.
 
 ### History
 
-From v0.13.0 to v0.22.0 the page had a second **Source**: a pen model that
+Up to v0.22.0 the page had a second **Source**: a pen model that
 wrote letters from a taught letter grammar through Hobby splines, paced them
 with a kinematic model and inked them with a simulated nib, with hands fitted
 from fonts (`src/pen/`, `scripts/pen-test.mjs`, `scripts/pen-check.mjs`). It
