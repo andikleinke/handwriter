@@ -19,7 +19,8 @@ import { buildSkeletonGraph } from './graph.js';
 import { orderStrokes } from './strokeOrder.js';
 import { resample, smoothPreservingCorners, simplifyRDP, polylineLength, roundPts, cumulativeLengths } from './geometry.js';
 
-export const RECORD_VERSION = 31;
+export const RECORD_VERSION = 33;
+const DETOUR_ALONG = 0.7; // a coverage detour must head within ~45° of the path's own direction at the vertex it leaves from
 
 /**
  * @param {{gid:number,name:string,path:string,bbox:object,xAdvance:number,chars:string}} glyph
@@ -493,6 +494,23 @@ function repairCoverage(strokesPx, raster, penWidthPx, emPx, distMap) {
       if (d2 > tipD2) { tipD2 = d2; tip = [bx, by]; }
     }
     if (Math.sqrt(tipD2) > maxReach) continue; // suspicious - leave it alone
+
+    // Only ink ahead along the path earns a detour: a foot the stem runs on
+    // into, a tip past a turn. A blob off the stroke's flank is width the
+    // stroke has there and the centreline underestimates (an arch's thick
+    // top); a detour into it is a spike sideways out of the stroke, which
+    // the stroke renderer draws as a lump.
+    {
+      const reach0 = Math.sqrt(tipD2) || 1;
+      const ux = (tip[0] - v[0]) / reach0, uy = (tip[1] - v[1]) / reach0;
+      // the path's direction into the vertex, over a few vertices (the
+      // last segment may already be curving away into the next part)
+      const dir = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return (dx * ux + dy * uy) / l; };
+      let cos;
+      if (best.vi > 0) cos = dir(pts[Math.max(0, best.vi - 3)], v);          // ink ahead of the way the pen came
+      else cos = -dir(v, pts[Math.min(pts.length - 1, 3)]);                 // at the start: ink behind it
+      if (cos < DETOUR_ALONG) continue;
+    }
 
     // A sliver, a pointed corner, or the outer bulge of a wedge where two
     // strokes merge - things a round nib simply rounds off - are not worth a

@@ -593,6 +593,25 @@ right side of the `e`'s eye in the test font) is left to the round nib, which
 simply rounds it off; a detour there made the pen visibly go up, down and up
 again. Each repair is reported in the log (`tail-retrace`).
 
+
+#### Detours only along the path (v0.35.0)
+
+Autography's `m` came out as a chain of lumps. Its recovered path carried
+four there-and-back detours spliced in by the coverage repair above: one
+down the first stem into its foot, and three sideways into the thick tops
+of the arches and the base between them, where the thinned centreline
+underestimates a stroke that is simply heavy there. Under the outline
+reveal the detours never showed; the stroke renderer draws every one as
+a hairpin with junction-confused widths, a lump. A detour is now spliced
+in only where the ink lies ahead along the path's own direction into the
+vertex it leaves from (over a few vertices, since the last segment may
+already be curving away), or behind the stroke's start: a foot the stem
+runs on into, a tip past a turn. A blob off the stroke's flank is width
+the ribbon has there anyway. The `m` keeps its foot and loses the three
+sideways spikes (75 → 43 points); "Rome" XOR 9.4 → 9.1 %, with the arches
+smooth. Records regenerate (version 33); hand-corrected letters keep
+their own paths.
+
 ### Pen plan: bridges between letters
 
 Glyph records only know their own letter. `src/lib/penPlan.js` decides how

@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.35.0",
+    "tag": "v0.35.0",
+    "date": "2026-10-18",
+    "note": "v0.35.0 — coverage detours only along the path: the m's sideways spikes are gone"
+  },
+  {
     "version": "0.34.0",
     "tag": "v0.34.0",
     "date": "2026-10-18",
-    "note": "v0.34.0 — bridges stay on the ink, a tail may turn down a stem, and a loop is told from a retraced stem by its area"
+    "note": "bridges on the ink; approach-only flow for round nibs"
   },
   {
     "version": "0.33.0",
