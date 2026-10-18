@@ -196,7 +196,15 @@ export function derivePath(it) {
       it.points = joinRuns(pathFromRuns(it.full, [it.runs[0]]), pathFromRuns(it.full, [it.runs[1]]));
       return it;
     } else {
-      it.runs = [[it.entryAt, 0], [0, it.tailCut]];
+      // landed mid-stroke: write back to the start. Where the way on from
+      // just past the landing retraces the head (a stem the stroke writes
+      // up and back down anyway), carry on from there rather than writing
+      // the head a third time; elsewhere retrace it to the landing
+      const j = it.entryAt, nxt = Math.min(j + 1, it.tailCut);
+      const hw = 0.5 * (it.stroke.widths?.[nxt] || (it.record?.penWidth || 40) * 0.4);
+      let under = Infinity;
+      for (let i = 1; i <= j; i++) under = Math.min(under, distToSegment(it.full[nxt][0], it.full[nxt][1], it.full[i - 1], it.full[i]));
+      it.runs = nxt > j && under <= hw ? [[j, 0], [nxt, it.tailCut]] : [[j, 0], [0, it.tailCut]];
       it.entry = { seg: it.entryAt, t: it.entryT || 0 };
     }
   } else {
@@ -439,16 +447,17 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, loopGap, minFl
   while (jMax + 1 <= next.tailCut - 1 && qc[jMax + 1] <= entryWindow) jMax++;
 
   const tangentOut = new Map(); // direction the pen travels after entering at j
-  const entering = (j) => {
-    let t = tangentOut.get(j);
+  const entering = (j, mid) => {
+    const key = mid ? -j - 1 : j;
+    let t = tangentOut.get(key);
     if (!t) {
-      if (qc[j] <= trimWindow) {
+      if (!mid) {
         t = leadingTangent(Q.slice(j), 12);
       } else {
         const back = trailingTangent(Q.slice(0, j + 1), 12); // arriving at j from the start
         t = [-back[0], -back[1]];                             // so the pen heads back toward it
       }
-      tangentOut.set(j, t);
+      tangentOut.set(key, t);
     }
     return t;
   };
@@ -514,7 +523,11 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, loopGap, minFl
     const ti = trailingTangent(P.slice(0, i + 1), 12);
     const trimP = pc[b0] - pc[i];
     for (let j = 0; j <= jMax; j++) {
-      const midVertex = qc[j] > trimWindow;
+      // A round nib may land anywhere on the stroke and write back to its
+      // start (an o's tail ends at the top of an n's stem, 0.14 em in: the
+      // pen goes down the stem from there); a pointed pen only skips a
+      // hairline head within the trim window
+      const midVertex = allowMidEntry ? j > 0 : qc[j] > trimWindow;
       if (midVertex && !allowMidEntry) break; // only the hairline head is open
       // a skipped head is skipped ink: only a pointed pen's hairline head,
       // which the arriving tail stands in for, may be left out
@@ -545,7 +558,7 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, loopGap, minFl
           if (!loop) continue;
         }
       }
-      best = consider(best, i, ti, trimP, Q[j], qc[j], entering(j), midVertex, j, 0, loop);
+      best = consider(best, i, ti, trimP, Q[j], qc[j], entering(j, midVertex), midVertex, j, 0, loop);
       // and, for a mid-entry, the closest point along the segment after it -
       // a straight stem has few vertices, and the pen should land on the
       // stem exactly where the previous stroke arrives

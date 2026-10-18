@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.33.0",
+    "tag": "v0.33.0",
+    "date": "2026-10-18",
+    "note": "v0.33.0 — a round nib may land anywhere on the next stroke: an o's exit tail runs into the top of the n's stem and down it"
+  },
+  {
     "version": "0.32.0",
     "tag": "v0.32.0",
     "date": "2026-10-18",
-    "note": "v0.32.0 — loop entries: an exit tail that arrives on an e's eye runs the eye the way it came and carries on; no loop is written there and back any more"
+    "note": "loop entries at joins"
   },
   {
     "version": "0.31.0",

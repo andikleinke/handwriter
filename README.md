@@ -648,6 +648,22 @@ writing an `o` twice. Loop entries are tried only after the ordinary
 candidates, so a join that flowed before still flows the same way.
 Autography `he` XOR 11.4 → 9.2 %, `hello` 9.1 → 8.1 %.
 
+
+#### Landing anywhere on a round nib's stroke (v0.33.0)
+
+Autography's `o` ends in a long exit tail that reaches exactly to the top
+of the next `n`'s stem, 6 units from it. The planner could not use that
+landing: it lies within the 0.22 em "hairline head" window, and for a
+round nib a skipped head is skipped ink, so it landed further along, on
+the arch, and wrote the whole stem there and back from there - the hook
+and the lump at the `n`'s shoulder. A round nib may now land on any vertex
+of the stroke and write back to its start; where the way on from just past
+the landing retraces the head (a stem the stroke writes up and back down
+anyway), the pen carries on from there instead of writing the head a third
+time. The `o`'s tail now runs into the stem top, down the stem, and on into
+the arch, and the same opens up the `q`→`u`, `u`→`i`, `b`→`r` and `o`→`w`
+joins in the pangram that used to lift.
+
 ### Speed model
 
 `src/lib/timing.js` turns the plan's geometry into a clock. **Natural speed**
