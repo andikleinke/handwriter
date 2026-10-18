@@ -621,6 +621,33 @@ hand does once it has stopped flowing. Bridges are derived data — never
 cached, recomputed after every edit, and listed in the JSON panel under
 `plan.bridges`; the log says where the pen flowed and where it lifted and why.
 
+
+#### Loop entries (v0.32.0)
+
+An `h`'s exit in Autography rises straight onto the left side of the `e`'s
+eye, 7 units from it, going up. No ordinary landing flows from there: the
+`e`'s own start lies 42 units back down and left, and the one mid-stroke
+landing the planner knew - land, write back to the stroke's start, retrace,
+carry on - is for stems; on an eye it draws the loop twice. So the join was
+a lift, with the jog that shows.
+
+A **loop entry** is what the writer does: land on the eye where the tail
+arrives, run the eye the way the tail was going (up the left side, over,
+down, along the bar) back to where it closes, and carry on into the bowl
+from just past the landing. `tryBridge` recognises a head as a loop when
+the stroke's start comes within 0.08 em of the path again shortly past the
+landing; such a head is never written there and back. It is entered as a
+loop when it is an eye - at most 0.45 em round, leaving out no more than
+0.03 em before it closes - and the stroke leads on past it, away from it.
+The backward run and the way on are joined where they cross
+(`joinRuns`), so the bar meets the descender without a round cap poking
+past. An `o`'s bowl (0.75 em in Ms Madi, running on alongside itself)
+reads worse run backwards and is not an eye: entered where no ordinary
+landing flows, the pen lifts instead, which also ends the old habit of
+writing an `o` twice. Loop entries are tried only after the ordinary
+candidates, so a join that flowed before still flows the same way.
+Autography `he` XOR 11.4 → 9.2 %, `hello` 9.1 → 8.1 %.
+
 ### Speed model
 
 `src/lib/timing.js` turns the plan's geometry into a clock. **Natural speed**

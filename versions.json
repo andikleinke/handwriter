@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.32.0",
+    "tag": "v0.32.0",
+    "date": "2026-10-18",
+    "note": "v0.32.0 — loop entries: an exit tail that arrives on an e's eye runs the eye the way it came and carries on; no loop is written there and back any more"
+  },
+  {
     "version": "0.31.0",
     "tag": "v0.31.0",
     "date": "2026-10-18",
-    "note": "v0.31.0 — smooth paths and round tips and corners: chains run along a spline through the record's points, tips are the nib's disc, bends get round joins"
+    "note": "smooth paths and round tips and corners"
   },
   {
     "version": "0.30.1",

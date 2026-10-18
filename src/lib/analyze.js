@@ -89,7 +89,7 @@ export function analyzeWord(fontCtx, text, store, opts = {}) {
  * changes.
  */
 export function rebuildPlan(analysis, opts = {}) {
-  analysis.plan = buildPenPlan(analysis.glyphs, { connect: opts.connect ?? true });
+  analysis.plan = buildPenPlan(analysis.glyphs, { connect: opts.connect ?? true, loopGapEm: opts.loopGapEm });
   analysis.penOrder = analysis.plan.penOrder;
   analysis.notes = analysis.glyphNotes.concat(analysis.plan.notes);
   return analysis.plan;

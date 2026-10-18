@@ -540,6 +540,7 @@ function run() {
         analysis = analyzeWord(fontCtx, text, store, {
           rasterEm: clampInt(el.rasterEm.value, 128, 1024, 512),
           connect: el.connect.checked,
+          loopGapEm: window.__loopGapEm, // console knob (scripts/inspect.js): 0 turns loop entries off
         });
         window.__analysis = analysis; // handy from the console while tuning
         window.__fontCheck = () => checkAnalysis(analysis); // invariant report (src/lib/fontCheck.js)
@@ -602,7 +603,7 @@ function loadAnimator() {
 function replan() {
   if (!analysis) return;
   clearTake();
-  rebuildPlan(analysis, { connect: el.connect.checked });
+  rebuildPlan(analysis, { connect: el.connect.checked, loopGapEm: window.__loopGapEm });
   paintLog();
   paintJSON();
   refreshSelectionUI();
