@@ -41,6 +41,9 @@ const LOOP_LEAD_EM = 0.35; // ...and the stroke must lead on this far past the l
 const LOOP_AWAY_EM = 0.15; // ...and by this far past it have left the loop by LOOP_AWAY_BY: an o runs on along its own bowl, and is worse entered as a loop
 const LOOP_AWAY_BY = 0.05;
 const LOOP_CLOSE_EM = 0.25; // a head is a loop when the stroke's start lies within LOOP_GAP_EM of the path again within this much path past the landing
+const BRIDGE_OFF_INK_EM = 0.03; // a bridge may run over background for at most this much path: a connector crosses the small gap the font leaves, never a counter
+const LOOP_MIN_EM = 0.15;   // ...and at least this: a few points of a bar are no loop
+const LOOP_AREA_EM = 0.04;  // a loop head encloses at least this square; a retraced stem encloses nothing
 const LOOP_MAX_EM = 0.45;   // ...and a loop entered this way is an eye, a small loop (an e's is 0.23 em; an o's bowl, 0.75 em, reads worse run backwards)
 
 /**
@@ -202,9 +205,19 @@ export function derivePath(it) {
       // the head a third time; elsewhere retrace it to the landing
       const j = it.entryAt, nxt = Math.min(j + 1, it.tailCut);
       const hw = 0.5 * (it.stroke.widths?.[nxt] || (it.record?.penWidth || 40) * 0.4);
-      let under = Infinity;
-      for (let i = 1; i <= j; i++) under = Math.min(under, distToSegment(it.full[nxt][0], it.full[nxt][1], it.full[i - 1], it.full[i]));
-      it.runs = nxt > j && under <= hw ? [[j, 0], [nxt, it.tailCut]] : [[j, 0], [0, it.tailCut]];
+      // the hop from the head's end to the way on must lie inside the
+      // head's own ink all along (up a stem it does; across an o's counter
+      // it does not)
+      const F = it.full, a = F[0], b = F[nxt];
+      const hop = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      let under = true;
+      for (let k = 0, n = Math.max(1, Math.ceil(hop / 8)); k <= n && under; k++) {
+        const t = k / n, px = a[0] + (b[0] - a[0]) * t, py = a[1] + (b[1] - a[1]) * t;
+        let d = Infinity;
+        for (let i = 1; i <= j; i++) d = Math.min(d, distToSegment(px, py, F[i - 1], F[i]));
+        if (d > hw) under = false;
+      }
+      it.runs = nxt > j && under ? [[j, 0], [nxt, it.tailCut]] : [[j, 0], [0, it.tailCut]];
       it.entry = { seg: it.entryAt, t: it.entryT || 0 };
     }
   } else {
@@ -268,10 +281,19 @@ function closestOnSegments(a0, a1, b0, b1) {
   return best;
 }
 
-/** Whether Q[0] lies within `gap` of the path between the landing `j` and `within` of path past it. */
-function startReturns(Q, qc, j, gap, within) {
+/**
+ * Whether the head of a stroke landed on at `j` is a loop: Q[0] lies within
+ * `gap` of the path again between the landing and `within` of path past it,
+ * and the path from the start to there encloses at least `minArea` (a stem
+ * written up and back down also returns to its start, with no area at all).
+ */
+function startReturns(Q, qc, j, gap, within, minArea) {
   for (let i = j + 1; i < Q.length && qc[i] <= qc[j + 1] + within; i++) {
-    if (distToSegment(Q[0][0], Q[0][1], Q[i - 1], Q[i]) <= gap) return true;
+    if (distToSegment(Q[0][0], Q[0][1], Q[i - 1], Q[i]) > gap) continue;
+    let area = 0;
+    for (let q = 0; q < i; q++) area += Q[q][0] * Q[q + 1][1] - Q[q + 1][0] * Q[q][1];
+    area += Q[i][0] * Q[0][1] - Q[0][0] * Q[i][1]; // closed back to the start
+    if (Math.abs(area) / 2 >= minArea) return true; // else a near segment of the head's own stretch: look on
   }
   return false;
 }
@@ -467,10 +489,35 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, loopGap, minFl
   // every trimmed point must lie under the bridge's ribbon
   const halfW = 0.5 * (prev.stroke.endWidth || (prev.record?.penWidth || 40) * 0.4);
   const nextHalfW = (j) => 0.5 * (next.stroke.widths?.[j] || (next.record?.penWidth || 40) * 0.4);
-  const covered = (i, ti, target, tj, d, j) => {
-    if (allowHeadSkip || i >= b0) return true;
+  const bridgeCurve = (i, ti, target, tj, d) => {
     const m = Math.max(d, 1);
-    const br = hermite(P[i], [ti[0] * m, ti[1] * m], target, [tj[0] * m, tj[1] * m], Math.max(3, Math.ceil(d / 6)));
+    return hermite(P[i], [ti[0] * m, ti[1] * m], target, [tj[0] * m, tj[1] * m], Math.max(3, Math.ceil(d / 6)));
+  };
+  // ink under a point, in either letter
+  const rasters = [prev.glyph, next.glyph].filter((g) => g?.raster);
+  const onInk = (p) => rasters.some((g) => {
+    const r = g.raster;
+    const [x, y] = fontToRaster(r, p[0] - g.x, p[1] - g.y);
+    const xi = Math.round(x), yi = Math.round(y);
+    return xi >= 0 && yi >= 0 && xi < r.width && yi < r.height && r.fill[yi * r.width + xi];
+  });
+  // path length of the bridge that runs over background
+  const offInk = (br) => {
+    if (!rasters.length) return 0;
+    let off = 0;
+    for (let q = 1; q < br.length; q++) {
+      const d = Math.hypot(br[q][0] - br[q - 1][0], br[q][1] - br[q - 1][1]);
+      const n = Math.max(1, Math.ceil(d / 4));
+      for (let k = 1; k <= n; k++) {
+        const t = k / n;
+        if (!onInk([br[q - 1][0] + (br[q][0] - br[q - 1][0]) * t, br[q - 1][1] + (br[q][1] - br[q - 1][1]) * t])) off += d / n;
+      }
+    }
+    return off;
+  };
+  const maxOff = BRIDGE_OFF_INK_EM * (trimWindow / 0.22);
+  const covered = (i, ti, target, tj, d, j, br) => {
+    if (allowHeadSkip || i >= b0) return true;
     const hw = nextHalfW(j);
     for (let k = i + 1; k <= b0; k++) {
       let best = Infinity;
@@ -489,25 +536,40 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, loopGap, minFl
     }
     return true;
   };
+  const trace = globalThis.__joinTrace; // console aid: push every candidate's fate
   const consider = (state, i, ti, trimP, target, arc, tj, midEntry, j, t, loop = false) => {
     const dx = target[0] - P[i][0], dy = target[1] - P[i][1];
     const d = Math.hypot(dx, dy);
-    if (d > maxGap) return state;
+    const note = (why, extra) => { if (trace) trace.push({ i, j, t, d: Math.round(d), why, ...extra }); return state; };
+    if (d > maxGap) return note('gap');
     const u = d > 1e-6 ? [dx / d, dy / d] : ti;
     // landing mid-stroke the pen turns after touching down, so only the
-    // approach counts; joining a hairline both ends must agree with the hop
-    const flow = midEntry
+    // approach counts - and for a round nib on any landing: where the
+    // stroke heads after the pen is down is the letter's business (a tail
+    // runs up to a stem's top and the pen turns down the stem). Joining a
+    // pointed pen's hairline both ends must agree with the hop
+    const flow = midEntry || allowMidEntry
       ? ti[0] * u[0] + ti[1] * u[1]
       : (ti[0] * u[0] + ti[1] * u[1] + u[0] * tj[0] + u[1] * tj[1]) / 2;
-    if (flow < minFlow) return state;
+    if (flow < minFlow) return note('flow', { flow: +flow.toFixed(2) });
     // A kink costs far more than distance: two parallel hairlines a little
     // apart are joined by a long shallow S, not a short jog. Skipping a
     // hairline costs a little; writing a stem twice a little more.
     // a loop entry skips nothing and doubles nothing: no head cost
     const headCost = loop ? 0 : midEntry ? 0.25 * trimWindow + 0.15 * (arc - trimWindow) : 0.25 * arc;
-    const cost = 0.2 * d + 150 * (1 - flow) + 0.25 * trimP + headCost;
-    if (state && cost >= state.cost) return state;
-    if (!covered(i, ti, target, tj, d, j)) return state;
+    // the hop itself weighs: with the approach alone judging a round nib's
+    // landing, a long hop to a stem's middle must not beat a short one to
+    // its top
+    const cost = 0.5 * d + 150 * (1 - flow) + 0.25 * trimP + headCost;
+    if (state && cost >= state.cost) return note('cost', { cost: Math.round(cost), best: Math.round(state.cost) });
+    const br = bridgeCurve(i, ti, target, tj, d);
+    // a bridge is the pen crossing the small gap the font leaves between a
+    // tail and an entry; one that cuts across a counter draws a line the
+    // font does not have
+    const off = offInk(br);
+    if (off > maxOff) return note('ink', { off: Math.round(off) });
+    if (!covered(i, ti, target, tj, d, j, br)) return note('covered');
+    if (trace) trace.push({ i, j, t, d: Math.round(d), why: 'best', cost: Math.round(cost), flow: +flow.toFixed(2), loop, midEntry });
     return { i, j, t, d, flow, cost, ti, tj, trimP, midEntry, loop, target };
   };
 
@@ -545,12 +607,13 @@ function tryBridge(prev, next, { maxGap, trimWindow, entryWindow, loopGap, minFl
         // the head is a loop when the stroke's start comes within reach of
         // the path again a little past the landing
         const upem = trimWindow / 0.22;
-        const closes = loopGap > 0 && qc[j] >= 2 * loopGap && startReturns(Q, qc, j, loopGap, LOOP_CLOSE_EM * upem);
+        const closes = loopGap > 0 && qc[j] >= LOOP_HEAD_EM * upem && startReturns(Q, qc, j, loopGap, LOOP_CLOSE_EM * upem, (LOOP_AREA_EM * upem) ** 2);
         if (closes) {
-          if (!allowLoops) continue;
+          if (!allowLoops) { if (trace) trace.push({ j, why: 'closes' }); continue; }
           const k = j + 1 <= next.tailCut ? loopClose(Q, j, j + 1) : -1;
           loop = k >= 0
             && Math.hypot(Q[k][0] - Q[j + 1][0], Q[k][1] - Q[j + 1][1]) <= loopGap
+            && qc[j] - qc[k] >= LOOP_MIN_EM * upem
             && qc[j] - qc[k] <= LOOP_MAX_EM * upem
             && qc[k] <= LOOP_HEAD_EM * upem
             && qc[next.tailCut] - qc[j + 1] >= LOOP_LEAD_EM * upem

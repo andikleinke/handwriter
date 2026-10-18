@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.34.0",
+    "tag": "v0.34.0",
+    "date": "2026-10-18",
+    "note": "v0.34.0 — bridges stay on the ink, a tail may turn down a stem, and a loop is told from a retraced stem by its area"
+  },
+  {
     "version": "0.33.0",
     "tag": "v0.33.0",
     "date": "2026-10-18",
-    "note": "v0.33.0 — a round nib may land anywhere on the next stroke: an o's exit tail runs into the top of the n's stem and down it"
+    "note": "land anywhere on a round nib's stroke"
   },
   {
     "version": "0.32.0",

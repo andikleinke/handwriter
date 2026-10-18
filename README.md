@@ -664,6 +664,41 @@ time. The `o`'s tail now runs into the stem top, down the stem, and on into
 the arch, and the same opens up the `q`→`u`, `u`→`i`, `b`→`r` and `o`→`w`
 joins in the pangram that used to lift.
 
+
+#### Bridges stay on the ink, and a tail may turn down a stem (v0.34.0)
+
+Autography's "Rom" showed two more faults of the same planner. The R's
+tail ends on the o's left side, but the only landing that scored was on
+the o's top, and the bridge to it ran 42 of its 89 units across the o's
+counter: a diagonal line the font does not have. The o's tail ends 33
+units from the top of the m's first stem, but a landing on a stroke's start
+was scored by the average of approach and departure, and the departure is
+straight back down the stem, so it failed and the pen went for the arch
+instead, writing the stem there and back from there. Three rules:
+
+- **A bridge may run over background for at most 0.03 em.** Every candidate's
+  curve is sampled against both letters' rasters. A connector crosses the
+  small gap the font leaves between a tail and an entry; one that cuts
+  across a counter is thrown out.
+- **For a round nib the approach alone judges a landing.** Where the stroke
+  heads once the pen is down is the letter's business: a tail runs up to a
+  stem's top and the pen turns down the stem, the join every n and m is
+  written with. Pointed pens keep the averaged score for their hairlines.
+  The hop's length weighs more in the cost (0.5 per unit, was 0.2), so a
+  6-unit hop to a stem's top beats a 78-unit one to its middle.
+- **The v0.33 shortcut past the landing** is taken only when the hop from the
+  head's end to the way on lies inside the head's own ink all along (up a
+  stem it does; across an o's counter it does not).
+
+Telling a loop head from a retraced stem also had to get stricter, since
+both return to their start: a loop head now has to enclose at least a
+0.04 em square (the polygon closed back to the start), the scan for the
+return does not stop at the head's own next segment, and a loop entry's
+loop is at least 0.15 em round. Autography "Rom" 9.0 %, "Jon" 8.2 %,
+`he` keeps its loop entry at 9.2 %; `the quick brown fox` now flows at
+nine of its twelve joins. `window.__joinTrace = []` before an analysis
+records every candidate's fate for the console.
+
 ### Speed model
 
 `src/lib/timing.js` turns the plan's geometry into a clock. **Natural speed**
