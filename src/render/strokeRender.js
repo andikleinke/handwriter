@@ -47,7 +47,10 @@ export function buildStrokeProgram(maps, upem, scale = 0.512) {
     };
     const hl = smooth(sc.halfL).map((v) => Math.max(0.5 / scale, v - bias));
     const hr = smooth(sc.halfR).map((v) => Math.max(0.5 / scale, v - bias));
-    const rb = { chain: ci, s: sc.s, pts: sc.pts.map((p) => [p[0], p[1]]), tan: sc.tan, hl, hr, left: null, right: null, _cache: null };
+    // the nib's radius along the chain (sweep.js: the running minimum of the
+    // ink's half-width, which a crossing or a knot does not inflate)
+    const nib = sc.R ? Float32Array.from(sc.R).map((v) => Math.max(0.5 / scale, v - bias)) : null;
+    const rb = { chain: ci, s: sc.s, pts: sc.pts.map((p) => [p[0], p[1]]), tan: sc.tan, hl, hr, nib, rad: null, left: null, right: null, _cache: null };
     rebuildEdges(rb);
     out.push(rb);
   });
@@ -58,11 +61,20 @@ export function buildStrokeProgram(maps, upem, scale = 0.512) {
 export function rebuildEdges(rb) {
   const n = rb.pts.length;
   rb.left = new Array(n); rb.right = new Array(n);
+  rb.rad = new Float32Array(n);
   for (let k = 0; k < n; k++) {
     const [x, y] = rb.pts[k];
     const nx = -rb.tan[2 * k + 1], ny = rb.tan[2 * k]; // the left normal
     rb.left[k] = [x + nx * rb.hl[k], y + ny * rb.hl[k]];
     rb.right[k] = [x - nx * rb.hr[k], y - ny * rb.hr[k]];
+    // The disc at a sample is the nib's footprint: its radius, clamped to the
+    // two half-widths. Where the halves differ - the outside of a sharp turn
+    // reads wide, the inside narrow - the smaller half alone left the turn's
+    // outer round cut flat by the straight edge between the legs' offsets.
+    // (the nib's radius was tried here: it spilled wherever a half had been
+    // cut on purpose at a junction, +2 % XOR; the corners are rounded by the
+    // joins in piece() instead)
+    rb.rad[k] = Math.min(rb.hl[k], rb.hr[k]);
   }
   rb._cache = null;
 }
@@ -79,7 +91,7 @@ const CHUNK = 24; // samples per cached piece of ribbon
  * under a nonzero fill, and the discs fill the outer wedge of every turn and
  * round the start and the front.
  */
-export function piece(L, R, C, k0, k1) {
+export function piece(L, R, C, k0, k1, RAD = null) {
   const path = new Path2D();
   const tri = (a, b, c) => {
     const area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
@@ -87,17 +99,51 @@ export function piece(L, R, C, k0, k1) {
     if (area < 0) { const t = b; b = c; c = t; }
     path.moveTo(a[0], a[1]); path.lineTo(b[0], b[1]); path.lineTo(c[0], c[1]); path.closePath();
   };
-  const disc = (c, l, r) => {
-    const rad = Math.min(Math.hypot(l[0] - c[0], l[1] - c[1]), Math.hypot(r[0] - c[0], r[1] - c[1]));
+  const disc = (c, l, r, k) => {
+    const rad = RAD ? RAD[k] : Math.min(Math.hypot(l[0] - c[0], l[1] - c[1]), Math.hypot(r[0] - c[0], r[1] - c[1]));
     if (rad > 0.3) { path.moveTo(c[0] + rad, c[1]); path.arc(c[0], c[1], rad, 0, Math.PI * 2); }
+  };
+  // a round join at every turn: where the path bends by more than a few
+  // degrees between samples, the straight edge between the two offsets cuts
+  // the outside of the bend (a corner of the recovered path, a sharp arch)
+  // and the disc, centred on the path, cannot reach it. A pie at the vertex,
+  // of that side's own half-width, from the normal before to the normal
+  // after, is what a round nib leaves there. Both sides get one: the inner
+  // pie lies within the two legs' ink anyway.
+  const pie = (v, a, b, r) => {
+    if (r < 0.3) return;
+    let a0 = Math.atan2(a[1] - v[1], a[0] - v[0]), a1 = Math.atan2(b[1] - v[1], b[0] - v[0]);
+    let d = a1 - a0;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    const steps = Math.max(2, Math.ceil(Math.abs(d) / (Math.PI / 18)));
+    const pts = [v];
+    for (let i = 0; i <= steps; i++) { const t = a0 + (d * i) / steps; pts.push([v[0] + r * Math.cos(t), v[1] + r * Math.sin(t)]); }
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; area += p[0] * q[1] - q[0] * p[1]; }
+    if (Math.abs(area) < 1e-6) return;
+    if (area < 0) pts.reverse();
+    path.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) path.lineTo(pts[i][0], pts[i][1]);
+    path.closePath();
   };
   for (let k = k0; k < k1; k++) {
     tri(L[k], L[k + 1], R[k + 1]);
     tri(L[k], R[k + 1], R[k]);
   }
-  for (let k = k0; k <= k1; k++) disc(C[k], L[k], R[k]);
+  for (let k = k0; k <= k1; k++) disc(C[k], L[k], R[k], k);
+  for (let k = Math.max(1, k0); k < k1; k++) {
+    const ax = C[k][0] - C[k - 1][0], ay = C[k][1] - C[k - 1][1], bx = C[k + 1][0] - C[k][0], by = C[k + 1][1] - C[k][1];
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    if (la < 1e-6 || lb < 1e-6) continue;
+    const cos = (ax * bx + ay * by) / (la * lb);
+    if (cos > JOIN_COS) continue; // a gentle bend: the samples' own offsets trace it
+    pie(C[k], L[k - 1], L[k + 1], Math.hypot(L[k][0] - C[k][0], L[k][1] - C[k][1]));
+    pie(C[k], R[k - 1], R[k + 1], Math.hypot(R[k][0] - C[k][0], R[k][1] - C[k][1]));
+  }
   return path;
 }
+const JOIN_COS = Math.cos((8 * Math.PI) / 180); // a bend sharper than this between samples gets a round join
 
 /**
  * Fill one ribbon up to arc length `p` (font units; Infinity = whole).
@@ -117,9 +163,13 @@ export function paintRibbon(ctx, rb, p, toCss, ink, cacheKey = null) {
   if (p === -Infinity || p < s[0]) return;
   if (!rb._cache || rb._cache.key !== cacheKey) {
     const L = left.map(toCss), R = right.map(toCss), C = pts.map(toCss);
-    rb._cache = { key: cacheKey, L, R, C, chunks: new Map() };
+    // the CSS scale, for the discs' radii
+    const o = toCss(pts[0]), ox = toCss([pts[0][0] + 1, pts[0][1]]);
+    const sc = Math.hypot(ox[0] - o[0], ox[1] - o[1]);
+    const RAD = rb.rad ? Array.from(rb.rad, (v) => v * sc) : null;
+    rb._cache = { key: cacheKey, L, R, C, RAD, chunks: new Map() };
   }
-  const { L, R, C, chunks } = rb._cache;
+  const { L, R, C, RAD, chunks } = rb._cache;
   let m = 0;
   const whole = p === Infinity || p >= s[n - 1];
   if (whole) m = n - 1;
@@ -130,7 +180,7 @@ export function paintRibbon(ctx, rb, p, toCss, ink, cacheKey = null) {
   const full = Math.floor(m / CHUNK);
   for (let c = 0; c < full; c++) {
     let path = chunks.get(c);
-    if (!path) { path = piece(L, R, C, c * CHUNK, Math.min(n - 1, (c + 1) * CHUNK)); chunks.set(c, path); }
+    if (!path) { path = piece(L, R, C, c * CHUNK, Math.min(n - 1, (c + 1) * CHUNK), RAD); chunks.set(c, path); }
     ctx.fill(path, 'nonzero');
   }
   // the chunk the front is in, with the front interpolated between samples
@@ -142,6 +192,7 @@ export function paintRibbon(ctx, rb, p, toCss, ink, cacheKey = null) {
     lF = lerp(L[m], L[m + 1]); rF = lerp(R[m], R[m + 1]); cF = lerp(C[m], C[m + 1]);
   }
   const Lp = L.slice(k0, m + 1).concat([lF]), Rp = R.slice(k0, m + 1).concat([rF]), Cp = C.slice(k0, m + 1).concat([cF]);
-  ctx.fill(piece(Lp, Rp, Cp, 0, Lp.length - 1), 'nonzero');
+  const Rp2 = RAD ? RAD.slice(k0, m + 1).concat([RAD[Math.min(n - 1, m + 1)] != null && !whole && m + 1 < n ? RAD[m] + (RAD[m + 1] - RAD[m]) * ((p - s[m]) / (s[m + 1] - s[m] || 1)) : RAD[m]]) : null;
+  ctx.fill(piece(Lp, Rp, Cp, 0, Lp.length - 1, Rp2), 'nonzero');
   ctx.restore();
 }

@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.31.0",
+    "tag": "v0.31.0",
+    "date": "2026-10-18",
+    "note": "v0.31.0 — smooth paths and round tips and corners: chains run along a spline through the record's points, tips are the nib's disc, bends get round joins"
+  },
+  {
     "version": "0.30.1",
     "tag": "v0.30.1",
     "date": "2026-10-18",
-    "note": "v0.30.1 — the Text field stays usable while a single letter is open: typing or Analyze returns to the text"
+    "note": "the Text field stays usable while a single letter is open: typing or Analyze returns to the text"
   },
   {
     "version": "0.30.0",

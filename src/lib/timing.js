@@ -23,7 +23,7 @@
  * Parameters live in DEFAULT_SPEED_MODEL; see README for their sources.
  */
 
-import { cumulativeLengths, pointAtLength, polylineLength } from './geometry.js';
+import { cumulativeLengths, pointAtLength, polylineLength, smoothThroughPoints } from './geometry.js';
 
 /**
  * Defaults come from the handwriting-kinematics literature (see README,
@@ -72,6 +72,8 @@ export const DEFAULT_SPEED_MODEL = Object.freeze({
  * each as one polyline in word coordinates. The animation's reveal maps and
  * the timeline both index chains by their position in this list.
  */
+export const CHAIN_STEP_EM = 0.004; // a chain's polyline is sampled this densely from the spline
+
 export function planChains(plan) {
   const groups = [];
   for (const it of plan.items) {
@@ -80,8 +82,10 @@ export function planChains(plan) {
     else groups.push({ id: it.chain, word: it.word, items: [it] });
   }
   const out = [];
+  const upem = plan.items.find((it) => it.record?.unitsPerEm)?.record.unitsPerEm || 1000;
   for (const g of groups) {
-    const poly = concatPolylines(g.items.map((it) => it.points));
+    // the record's sparse points, run through as a smooth spline (geometry.js)
+    const poly = smoothThroughPoints(concatPolylines(g.items.map((it) => it.points)), CHAIN_STEP_EM * upem);
     if (poly.length < 2) continue;
     const cum = cumulativeLengths(poly);
     const L = cum[cum.length - 1];

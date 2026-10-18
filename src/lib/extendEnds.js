@@ -18,6 +18,7 @@ import { fontToRaster } from './raster.js';
 export const EXTEND_MAX_EM = 0.12;   // an end is walked on at most this far
 export const EXTEND_WIDEN = 1.35;    // ...and stops where the ink grows this much wider than at the end
 export const EXTEND_PROBE = 1.6;     // the cross-section is read this many end widths either way
+export const EXTEND_NARROW = 0.9;    // ...and stops where it narrows to this fraction: the tip's own round, left to the nib
 
 /**
  * @param {{items: Array}} plan  from buildPenPlan (items mutated: points)
@@ -116,6 +117,10 @@ function walk(it, g, glyphs, upem, at) {
     const [a, b] = section(qx, qy, nx, ny, cap);
     const w = a + b + px1;
     if (w > EXTEND_WIDEN * w0) break;             // into a junction or a bowl
+    // the ink narrows: this is the rounded tip (or a taper) itself. Stop
+    // here and let the nib's disc round it; walked to the last pixel, the
+    // ribbon's edges converge on a point and the tip comes out as a chisel
+    if (w < EXTEND_NARROW * w0) break;
     if (tooClose(qx, qy)) break;                   // onto another stroke
     // re-centre, and let the tangent follow the ink
     qx += nx * (a - b) / 2; qy += ny * (a - b) / 2;

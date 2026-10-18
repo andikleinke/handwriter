@@ -233,3 +233,63 @@ export function roundPts(pts, decimals = 2) {
   const f = 10 ** decimals;
   return pts.map(([x, y]) => [Math.round(x * f) / f, Math.round(y * f) / f]);
 }
+
+/**
+ * A smooth, dense polyline through `pts`: a centripetal Catmull-Rom spline
+ * through the points, sampled about `step` apart, broken at any vertex
+ * where the path turns by more than `cornerDeg` so a real corner stays one.
+ * A stroke record keeps sparse points (thinned to 0.0012 em); a ribbon or a
+ * reveal map built straight along that polygon shows every vertex as a kink
+ * in its edges, where the pen's path was smooth.
+ */
+export function smoothThroughPoints(pts, step, cornerDeg = 60) {
+  const n = pts.length;
+  if (n < 3) return pts.map((p) => [p[0], p[1]]);
+  const cosLimit = Math.cos((cornerDeg * Math.PI) / 180);
+  // split at corners
+  const runs = [];
+  let run = [pts[0]];
+  for (let i = 1; i < n - 1; i++) {
+    const ax = pts[i][0] - pts[i - 1][0], ay = pts[i][1] - pts[i - 1][1];
+    const bx = pts[i + 1][0] - pts[i][0], by = pts[i + 1][1] - pts[i][1];
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    run.push(pts[i]);
+    if (la > 1e-9 && lb > 1e-9 && (ax * bx + ay * by) / (la * lb) < cosLimit) { runs.push(run); run = [pts[i]]; }
+  }
+  run.push(pts[n - 1]);
+  runs.push(run);
+  const out = [];
+  for (const r of runs) {
+    const seg = catmullRom(r, step);
+    if (out.length) seg.shift(); // the corner itself is shared
+    out.push(...seg);
+  }
+  return out;
+}
+
+/** Centripetal Catmull-Rom through `p`, each span sampled about `step` apart (ends exact). */
+function catmullRom(p, step) {
+  const m = p.length;
+  if (m < 2) return p.map((q) => [q[0], q[1]]);
+  if (m === 2) return [[p[0][0], p[0][1]], [p[1][0], p[1][1]]];
+  const out = [[p[0][0], p[0][1]]];
+  const ext = [reflect(p[1], p[0]), ...p, reflect(p[m - 2], p[m - 1])];
+  for (let i = 1; i < ext.length - 2; i++) {
+    const p0 = ext[i - 1], p1 = ext[i], p2 = ext[i + 1], p3 = ext[i + 2];
+    const span = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const k = Math.max(1, Math.ceil(span / step));
+    const t0 = 0, t1 = t0 + Math.sqrt(dist(p0, p1)), t2 = t1 + Math.sqrt(dist(p1, p2)), t3 = t2 + Math.sqrt(dist(p2, p3));
+    for (let j = 1; j <= k; j++) {
+      const t = t1 + ((t2 - t1) * j) / k;
+      out.push(j === k ? [p2[0], p2[1]] : crPoint(p0, p1, p2, p3, t0, t1, t2, t3, t));
+    }
+  }
+  return out;
+}
+function reflect(a, about) { return [2 * about[0] - a[0], 2 * about[1] - a[1]]; }
+function crPoint(p0, p1, p2, p3, t0, t1, t2, t3, t) {
+  const lerp = (a, b, ta, tb) => (tb - ta < 1e-12 ? a : [a[0] + ((b[0] - a[0]) * (t - ta)) / (tb - ta), a[1] + ((b[1] - a[1]) * (t - ta)) / (tb - ta)]);
+  const a1 = lerp(p0, p1, t0, t1), a2 = lerp(p1, p2, t1, t2), a3 = lerp(p2, p3, t2, t3);
+  const b1 = lerp(a1, a2, t0, t2), b2 = lerp(a2, a3, t1, t3);
+  return lerp(b1, b2, t1, t2);
+}

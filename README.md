@@ -14,7 +14,7 @@ dropped in through the font picker.
 The build's version is in the page title (`Stroke recovery prototype vX.Y.Z`,
 from `package.json`), so a screenshot or a recording names the build.
 
-## The stroke renderer (v0.27.0, the default since v0.28.0, ends and joins v0.29.0)
+## The stroke renderer (v0.27.0, the default since v0.28.0, ends and joins v0.29.0, smooth paths and round corners v0.31.0)
 
 *Renderer* in the player switches between two ways of drawing the same
 analysis:
@@ -85,16 +85,48 @@ nearest pen-down or pen-up) found two causes, neither of them width:
   and both renderers see one path. A dot is exempt: its stroke is now a
   short dab (±0.2 r) so the nib's round footprint is the dot.
 
+### Smooth paths, round tips and corners (v0.31.0)
+
+The ribbon's edges were facetted: a stroke record keeps only sparse points
+(thinned to 0.0012 em, about 28 units apart on Ms Madi), and the chain's
+polyline, the sampling, the timing and the ribbon all ran along that
+polygon, so every vertex showed as a kink in both edges. Now a chain's
+polyline is a centripetal Catmull-Rom spline through the record's points
+(`smoothThroughPoints` in `geometry.js`), broken at any vertex turning by
+more than 60° so a real corner stays one, sampled at 0.004 em; everything
+downstream shares that one smooth path.
+
+Three things at the ends of a path were still cut flat, and each had its
+own cause:
+
+- **A rounded tip reached to its last pixel** had edges converging on a
+  point. The end extension now stops where the ink narrows below 90 % of
+  the stroke's width, and the nib's disc rounds the rest.
+- **The apex of a hairpin** (a detour into a taper runs up and back over
+  the same line) and a free end sit anywhere between a radius and a pixel
+  from the ink's edge, where the readings are chords of the tip's circle and
+  the ribbon's rotating offsets cut corners. `roundTips` (`strokeFit.js`,
+  round nibs only) reads the room from the tip sample to the ink's edge off
+  the raster, places the disc of the stroke's radius at the sample that far
+  back, and gives the samples past it no width; a start instead grows its
+  disc from the touch-down point so no ink pops in.
+- **A sharp corner of the recovered path** (the `n`'s arch turns 100° in
+  one sample) had its outside cut by the straight edge between the two
+  legs' offsets, and no disc centred on the path could reach it, since a
+  thinned skeleton's vertex sits inside the true corner. The ribbon pieces
+  now carry a round join at every bend over 8° between samples: a pie at
+  the vertex, per side, of that side's own half-width.
+
 Measured on 2026-10-18 at 1920 px (`scripts/inspect.js`: `silhouette()` =
 alpha-mask XOR against the font's outline, split into ink the ribbon
 misses and ink it adds; `continuity()` = over 40 frames, new ink must touch
 existing ink and no ink may vanish), on hello · he · o · J · x · i:
 
-| Face | XOR, unfitted (v0.27) | XOR now | of which missing | of which extra | detached new ink | vanished ink | change at completion |
+| Face | XOR, unfitted (v0.27) | XOR now (v0.31) | of which missing | of which extra | detached new ink | vanished ink | change at completion |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Ms Madi (monoline) | 9–21 % | 8.6–13.3 % (hello 8.9, J 8.6, o 13.3) | 1.8–4.5 % | 6–10 % | 0 | 0 | ≤ 29 px |
-| Autography (monoline) | 8–16 % | 7.2–14.1 % (hello 8.6, J 7.2, x 14.1) | 1.5–5.4 % | 6–9 % | 0 | ≤ 2 px | ≤ 49 px |
-| Pinyon (shaded) | 12–24 % | 9.3–18.2 % (hello 9.3, J 10.0, x 18.2) | 3–10 % | 6–9 % | 0 | ≤ 2 px | ≤ 12 px |
+| Ms Madi (monoline) | 9–21 % | 8.2–13.1 % (hello 8.6, J 8.2, x 8.9, o 13.1) | 1.9–4.4 % | 6–9 % | 0 | 0 | 0 px |
+| Autography (monoline) | 8–16 % | 7.4–13.8 % (hello 9.1, J 7.4, x 13.8) | 2–7.6 % | 5–7.5 % | 0 | ≤ 1 px | ≤ 26 px |
+| Pinyon (shaded) | 12–24 % | 9.0–16.5 % (hello 9.4, J 9.0, x 16.5) | 3–8 % | 6–8.5 % | 0 | ≤ 1 px | ≤ 13 px |
 
 Exported frames (`renderFrames`) and the preview are pixel-identical at the
 same time. The missing share is now one to five percent of the ink on the

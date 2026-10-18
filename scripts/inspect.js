@@ -417,7 +417,7 @@ export async function missing(gi = 0, minBlob = 8) {
   const ends = [], samples = [];
   for (const rb of A()._strokes) {
     const L = rb.left.map(toR), R = rb.right.map(toR), C = rb.pts.map(toR);
-    ctx.fill(piece(L, R, C, 0, L.length - 1), 'nonzero');
+    ctx.fill(piece(L, R, C, 0, L.length - 1, rb.rad ? Array.from(rb.rad, (v) => v * r.scale) : null), 'nonzero');
     ends.push({ ci: rb.chain, at: 'start', p: C[0], w: rb.hl[0] + rb.hr[0] }, { ci: rb.chain, at: 'end', p: C[C.length - 1], w: rb.hl[rb.hl.length - 1] + rb.hr[rb.hr.length - 1] });
     for (let k = 0; k < C.length; k += 2) samples.push(C[k]);
   }
@@ -460,7 +460,7 @@ export async function missingImage(gi = 0, Z = 2) {
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const ctx = c.getContext('2d'); ctx.fillStyle = '#000';
   const toR = (p) => fontToRaster(r, p[0] - g.x, p[1] - g.y);
-  for (const rb of A()._strokes) ctx.fill(piece(rb.left.map(toR), rb.right.map(toR), rb.pts.map(toR), 0, rb.left.length - 1), 'nonzero');
+  for (const rb of A()._strokes) ctx.fill(piece(rb.left.map(toR), rb.right.map(toR), rb.pts.map(toR), 0, rb.left.length - 1, rb.rad ? Array.from(rb.rad, (v) => v * r.scale) : null), 'nonzero');
   const d = ctx.getImageData(0, 0, W, H).data;
   const img = ctx.createImageData(W, H);
   for (let i = 0; i < W * H; i++) {

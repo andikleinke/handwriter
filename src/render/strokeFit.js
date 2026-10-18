@@ -59,7 +59,7 @@ export function fitProfiles(ribbons, sampled, chains, glyphs, upem, opts = {}) {
       const toR = (p) => fontToRaster(r, p[0] - g.x, p[1] - g.y);
       for (const rb of ribbons) {
         const L = rb.left.map(toR), R = rb.right.map(toR), C = rb.pts.map(toR);
-        ctx.fill(piece(L, R, C, 0, L.length - 1), 'nonzero');
+        ctx.fill(piece(L, R, C, 0, L.length - 1, rb.rad ? Array.from(rb.rad, (v) => v * r.scale) : null), 'nonzero');
       }
       const d = ctx.getImageData(0, 0, c.width, c.height).data;
       const m = new Uint8Array(c.width * c.height);
@@ -170,4 +170,111 @@ export function applyManualWidths(ribbons, sampled, chains, glyphs, upem) {
     if (applied) rebuildEdges(rb);
   });
   return applied;
+}
+
+export const TIP_TURN = -0.5; // tangents this far reversed across a short arc mark a hairpin's apex
+
+/**
+ * Round the tips a round nib leaves: the free ends of its strokes and the
+ * apex of every hairpin (a detour into a taper runs up to the tip and back
+ * over the same line). The cross-section readings there are chords of the
+ * tip's circle and narrow to nothing, so the ribbon's edges converge and the
+ * tip comes out as a chisel. Here the room along the path from the tip
+ * sample to the ink's edge is read off the raster, and the samples within
+ * that much path are held to at least that half-width: the ribbon ends in
+ * the nib's disc, which reaches the ink's edge exactly. Pointed pens are
+ * left alone: their ends taper, and they should. Runs after the fit and the
+ * hand's widths, since the fit would shrink the held samples back.
+ */
+export function roundTips(ribbons, sampled, chains, glyphs) {
+  let n = 0;
+  ribbons.forEach((rb) => {
+    const items = chains[rb.chain].items;
+    const sc = sampled[rb.chain];
+    const m = rb.hl.length;
+    if (m < 4) return;
+    const step = Math.abs(rb.s[1] - rb.s[0]) || 1;
+    const glyphAt = (k) => { const it = items[sc.item[k]]; return it && it.type === 'stroke' ? it : null; };
+    const width = (k) => rb.hl[k] + rb.hr[k];
+    // the stroke's width a little way from sample `a` in direction `dir`
+    const widthNear = (a, dir) => {
+      const w0 = width(a) || step;
+      const from = Math.round((0.6 * w0) / step), to = Math.round((1.4 * w0) / step);
+      const ws = [];
+      for (let j = from; j <= to; j++) { const k = a + dir * j; if (k >= 0 && k < m) ws.push(width(k)); }
+      if (!ws.length) return w0;
+      ws.sort((x, y) => x - y);
+      return ws[Math.floor(ws.length / 2)];
+    };
+    // ink along `u` from the sample, in font units
+    const room = (it, p, u, cap) => {
+      const g = glyphs[it.glyphIndex], r = g.raster;
+      if (!r) return 0;
+      const px1 = 1 / r.scale;
+      let d = 0;
+      while (d < cap) {
+        const [x, y] = fontToRaster(r, p[0] + u[0] * (d + px1) - g.x, p[1] + u[1] * (d + px1) - g.y);
+        const xi = Math.round(x), yi = Math.round(y);
+        if (!(xi >= 0 && yi >= 0 && xi < r.width && yi < r.height && r.fill[yi * r.width + xi])) break;
+        d += px1;
+      }
+      return d;
+    };
+    // The tip is the nib's disc: of the stroke's radius R, centred where
+    // the path is still R from the ink's edge. The pen runs on past that
+    // point (a detour goes almost to the edge, a skeleton end less far), and
+    // over that last bit the readings are chords of the same disc, which the
+    // ribbon's rotating offsets only cut corners from: so the samples past
+    // the disc's centre are given no width, and the centre the full radius.
+    const hold = (a, dirs, u) => {
+      const it = glyphAt(a);
+      if (!it || it.role === 'dot' || it.record?.stats?.hand?.pointed) return;
+      const w = Math.max(...dirs.map((d) => widthNear(a, d)));
+      const R = w / 2;
+      if (!(R > 0)) return;
+      const d = room(it, rb.pts[a], u, w);
+      const back = Math.round(Math.max(0, R - d) / step);
+      for (const dir of dirs) {
+        const c = Math.max(0, Math.min(m - 1, a + dir * back));
+        for (let k = a; k !== c; k += dir) {
+          // at a start the nib's footprint grows from the touch-down point: a
+          // disc that just reaches the ink's edge at every sample, each inside
+          // the next, so the ink never pops in; past an end or an apex the
+          // disc at the centre already covers everything and the width is 0
+          const r = a === 0 && dir === 1 ? Math.min(R, d + Math.abs(rb.s[k] - rb.s[a])) : 0;
+          rb.hl[k] = r; rb.hr[k] = r;
+        }
+        if (rb.hl[c] < R) rb.hl[c] = R;
+        if (rb.hr[c] < R) rb.hr[c] = R;
+      }
+      n++;
+    };
+    const tanAt = (k) => [rb.tan[2 * k], rb.tan[2 * k + 1]];
+    // the free ends: outward along the tangent
+    const t0 = tanAt(0), t1 = tanAt(m - 1);
+    hold(0, [1], [-t0[0], -t0[1]]);
+    hold(m - 1, [-1], t1);
+    // the hairpins: the apex is the sample where the tangents either side are most reversed
+    const j = Math.max(2, Math.round((0.15 * width(Math.floor(m / 2))) / step));
+    let k = j;
+    while (k < m - j) {
+      const a0 = tanAt(k - j), a1 = tanAt(k + j);
+      if (a0[0] * a1[0] + a0[1] * a1[1] < TIP_TURN) {
+        // the most reversed sample within reach
+        let best = k, bestDot = 1;
+        for (let q = k; q < Math.min(m - j, k + 2 * j); q++) {
+          const b0 = tanAt(q - j), b1 = tanAt(q + j);
+          const dot = b0[0] * b1[0] + b0[1] * b1[1];
+          if (dot < bestDot) { bestDot = dot; best = q; }
+        }
+        const back = rb.pts[best - j], fwd = rb.pts[best + j], apex = rb.pts[best];
+        let ux = apex[0] - (back[0] + fwd[0]) / 2, uy = apex[1] - (back[1] + fwd[1]) / 2;
+        const ul = Math.hypot(ux, uy);
+        if (ul > 1e-6) hold(best, [-1, 1], [ux / ul, uy / ul]);
+        k = best + 2 * j;
+      } else k++;
+    }
+    rebuildEdges(rb);
+  });
+  return n;
 }
