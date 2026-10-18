@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.30.1",
+    "tag": "v0.30.1",
+    "date": "2026-10-18",
+    "note": "v0.30.1 — the Text field stays usable while a single letter is open: typing or Analyze returns to the text"
+  },
+  {
     "version": "0.30.0",
     "tag": "v0.30.0",
     "date": "2026-10-18",
-    "note": "v0.30.0 — curve handles: the selected stroke edited as a cubic Bézier, fitted over its points and sampled back"
+    "note": "curve handles: the selected stroke edited as a cubic Bézier, fitted over its points and sampled back"
   },
   {
     "version": "0.29.0",

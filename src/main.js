@@ -480,10 +480,18 @@ el.handfile.addEventListener('change', async (e) => {
 /** Show one letter on its own for editing, or `null` to go back to the text. */
 function setLetterMode(ch) {
   letterMode = ch;
-  el.text.disabled = !!ch;
-  el.text.title = ch ? 'editing a single letter; close A–Z letters to write text again' : '';
+  el.text.title = ch ? 'showing a single letter; type here or press Analyze to write text again' : '';
   paintLetterStrip();
   run();
+}
+
+/** Typing text, or asking for it, ends the single-letter view without closing the panel. */
+function leaveLetterMode() {
+  if (!letterMode) return false;
+  letterMode = null;
+  el.text.title = '';
+  paintLetterStrip();
+  return true;
 }
 
 el.lettermode.addEventListener('click', () => {
@@ -857,12 +865,14 @@ function paintJSON() {
 
 /* ------------------------------------------------------------- controls -- */
 
-el.analyze.addEventListener('click', run);
+el.analyze.addEventListener('click', () => { leaveLetterMode(); run(); });
 el.text.addEventListener('keydown', (e) => {
   // Enter analyses, Shift+Enter starts a new line (folded into a space by run)
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); leaveLetterMode(); run(); }
 });
 el.text.addEventListener('input', () => {
+  // the text field is the text's: typing into it ends a single-letter view
+  leaveLetterMode();
   // grow with the text, up to a few lines
   el.text.rows = Math.min(6, Math.max(1, el.text.value.split('\n').length));
 });
