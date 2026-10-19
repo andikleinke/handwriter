@@ -1159,6 +1159,58 @@ font's `calt` feature), and an alternate has its own glyph id, so a
 correction made on the plain letter does not reach it; the studio edits
 the glyph the letter shapes to on its own.
 
+## The `a`'s kink, and what a junction may redraw (v0.40.0)
+
+Autography's `a` showed a kink at the top of its stem and two lumps on
+the bowl's left side that the letterform does not have. Neither was the
+path: the record's spline is smooth there. Both came from the junction
+rule in `sweep.js` (`capWidthsAtJunctions`), which redraws a short
+stretch of a chain that runs near another pass of the pen.
+
+- **The stem bowed fifteen units sideways.** The stretch under the apex is
+  cut into legs where the pen turns, and a leg past a corner entered with
+  the tangent of the single sample at the cut, which sits in the middle
+  of the turn: sixty degrees off the stem. The Hermite drawn through that
+  tangent bowed the whole stem and came back, which the stem's right edge
+  showed as a step. A leg past a corner now enters along its own chord.
+- **A leg inherited the union's width.** The same leg took as its entry
+  width the halves the previous leg ended with, read inside the merged ink
+  of bowl and stem and floored by a nib radius read there too: 55 units
+  for a stroke of 33. A leg past a corner now keeps the width its stroke
+  brought into the stretch, or, when nothing was brought in (the previous
+  leg was a hairpin's), the width the pen takes out.
+- **The bowl saw its own far side.** Two samples on the bowl's left were
+  flagged as a junction because the bowl's far side lay within reach,
+  seventy units away across empty counter, though no reading on either
+  side ran into other ink. Redrawn from their edges, their centreline
+  stepped sideways by a quarter of the width and the tangents there
+  swung fifty degrees: the lumps. A stretch no sample of which faces the
+  other pass is no junction now.
+- **The redrawn centreline meets the path.** The redraw took the midpoint
+  of the two continued edges as the centreline, which sits off the path
+  by half the difference of the halves wherever the path runs off the
+  stroke's axis (a skeleton hugging a bowl's inner edge): a step at each
+  end of every redrawn stretch. The centreline is now the path's own
+  Hermite between the clean samples either side, and each half is its
+  edge's distance from it.
+
+Measured on the stroke renderer at 1920 px: the `a`'s silhouette error
+11.6 → 9.7 %, its centreline's largest departure from the record's path
+15 → 6 units (the intended straightening of the skeleton's swerve under
+the apex); every case of the eighteen-word suite over Autography, Ms Madi
+and Pinyon still fully connected with at most 2 px vanishing, the rest
+within ±0.5 % of before. `globalThis.__legTrace = true` before an analysis
+collects every stretch's legs and redraws in `globalThis.__legLog`.
+
+Still at the apex: the tip disc there is the union's radius (the nib
+radius is read inside the merged ink of two strokes, which the hairpin's
+two legs, within 0.12 em of path of each other, are not seen as), so the
+top is rounder and wider than the font's slanted cut, and the stem's right
+edge steps in under it. The pen's front, which drew a wide stroke as a
+straight cut plus the nib's smaller disc, is now a half-disc of the
+stroke's width there: the ribbon's next samples clipped to that disc
+(`paintRibbon`), so the front neither leads the pen nor shows a shoulder.
+
 ## Recording
 
 **● Record** (next to Play) analyses the text field first if it changed,

@@ -261,6 +261,18 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
         }
       }
     }
+    // A stretch no sample of which faces the other pass is no junction: the
+    // readings there never ran into other ink (the inside of a bowl sees its
+    // far side within reach, seventy units away across empty counter). Left
+    // flagged, a two-sample stretch on the `a`'s bowl was redrawn from its
+    // edges and the centreline stepped sideways by a quarter of the width.
+    for (let k = 0; k < sc.n; ) {
+      if (!junction[k]) { k++; continue; }
+      let e = k, faces = false;
+      for (; e < sc.n && junction[e]; e++) if (sides[0][e] || sides[1][e]) faces = true;
+      if (!faces) for (let i = k; i < e; i++) junction[i] = 0;
+      k = e;
+    }
     sc.junction = junction;
     // per sample, [left, right]: is there ink beyond the band's edge on that
     // side (so the band should stop short of it)? Outside a junction stretch
@@ -336,18 +348,36 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
         if (cut > start) { legs.push([start, cut - 1, hairpin]); start = cut; hairpin = dot < -0.5; i = cut + turn; }
       }
       legs.push([start, e, hairpin]);
-      let carriedR = null;
+      let carriedR = null, carriedHalf = null;
+      // the direction a leg runs in, end to end: past a corner inside the
+      // stretch the sample's own tangent is mid-turn (the `a`'s stem, cut
+      // just under the apex, read a tangent 60 degrees off the stem and the
+      // Hermite through it bowed the whole stem fifteen units sideways)
+      const chordOf = (i, j) => {
+        const dx = sc.pts[j][0] - sc.pts[i][0], dy = sc.pts[j][1] - sc.pts[i][1];
+        const l = Math.hypot(dx, dy) || 1;
+        return [dx / l, dy / l];
+      };
+      if (globalThis.__legTrace) (globalThis.__legLog ||= []).push(['legs', ci, k, e, JSON.stringify(legs)].join(' '));
       for (const [a, b, afterHairpin] of legs) {
         // what the leg brings in: the clean run before the stretch, or, past
         // a corner (not a hairpin: there the pen is on another stroke), the
         // width the previous leg ended with - a hairline that bends stays a
         // hairline
+        const after = b === e && e + 1 < sc.n ? clean(e + 1, 1) : null;
+        // Past a corner the leg keeps the width its stroke brought into the
+        // stretch, not the halves the previous leg ended with: those are
+        // readings of the union where the legs merge, floored by a nib
+        // radius read in the same union (the `a`'s stem, starting under the
+        // apex, came in 55 wide for a stroke of 33). Where nothing was
+        // brought in (the previous leg was a hairpin's, on another stroke),
+        // the width the pen takes out is the stroke's: eight pixels coming
+        // out, eight all the way through.
         const before = a === k ? (k > 0 ? clean(k - 1, -1) : null)
           : afterHairpin ? null
-            : { half: [sc.halfL[a - 1], sc.halfR[a - 1]], R: carriedR, tan: [sc.tan[2 * (a - 1)], sc.tan[2 * (a - 1) + 1]] };
+            : { half: carriedHalf || after?.half || [sc.halfL[a - 1], sc.halfR[a - 1]], R: carriedR, tan: chordOf(a - 1, Math.min(b + 1, sc.n - 1)) };
         // the nib radius where this stroke came in, carried through its corners
-        if (before) carriedR = before.R;
-        const after = b === e && e + 1 < sc.n ? clean(e + 1, 1) : null;
+        if (before) { carriedR = before.R; carriedHalf = before.half; } else carriedHalf = null;
         const s0 = sc.s[a > 0 ? a - 1 : a], s1 = sc.s[b + 1 < sc.n ? b + 1 : b];
         const short = before && after && sc.s[b] - sc.s[a] <= JUNCTION_MAX_EM * upem;
         // Through a crossing each EDGE of the stroke continues as a line
@@ -367,27 +397,36 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
           const thinIn = pointed && before.half[0] + before.half[1] < THIN_IN_THICK * 2 * sc.R[a];
           if (!thinIn) {
             const L0 = edgeAt(a - 1, 0), L1 = edgeAt(b + 1, 0), R0 = edgeAt(a - 1, 1), R1 = edgeAt(b + 1, 1);
+            const P0 = sc.pts[a - 1], P1 = sc.pts[b + 1];
             const fresh = [];
             for (let i = a; i <= b; i++) {
               const t = (sc.s[i] - s0) / (s1 - s0);
-              const l = hermite(L0, before.tan, L1, after.tan, t), r = hermite(R0, before.tan, R1, after.tan, t);
-              const mid = [(l[0] + r[0]) / 2, (l[1] + r[1]) / 2];
+              // the centreline is the path's own Hermite, so it meets the
+              // path at both ends: the edges' midpoint sat off the path by
+              // half the difference of the halves wherever the path runs
+              // off the stroke's axis (a skeleton hugging a bowl's inner
+              // edge), a step at each end of every stretch
+              const mid = hermite(P0, before.tan, P1, after.tan, t);
               if (!onInk(mid)) break;
-              fresh.push({ mid, half: Math.hypot(l[0] - r[0], l[1] - r[1]) / 2 });
+              fresh.push({ mid, l: hermite(L0, before.tan, L1, after.tan, t), r: hermite(R0, before.tan, R1, after.tan, t) });
             }
             if (fresh.length === b - a + 1) {
               edged = true;
-              for (let i = a; i <= b; i++) {
-                sc.pts[i] = fresh[i - a].mid;
-                sc.halfL[i] = sc.halfR[i] = fresh[i - a].half;
-                facing[2 * i] = facing[2 * i + 1] = 1;
-              }
+              if (globalThis.__legTrace) (globalThis.__legLog ||= []).push(['edged', ci, a, b, 'before', JSON.stringify(before), 'after', JSON.stringify(after)].join(' '));
+              for (let i = a; i <= b; i++) sc.pts[i] = fresh[i - a].mid;
               for (let i = Math.max(1, a - 1); i <= Math.min(sc.n - 2, b + 1); i++) {
                 const q0 = sc.pts[i - 1], q1 = sc.pts[i + 1];
                 const dx = q1[0] - q0[0], dy = q1[1] - q0[1];
                 const l = Math.hypot(dx, dy) || 1;
                 sc.tan[2 * i] = dx / l;
                 sc.tan[2 * i + 1] = dy / l;
+              }
+              // each half is the edge's distance from the new centreline
+              for (let i = a; i <= b; i++) {
+                const f = fresh[i - a], nx = -sc.tan[2 * i + 1], ny = sc.tan[2 * i];
+                sc.halfL[i] = Math.max(0.5 * step, (f.l[0] - f.mid[0]) * nx + (f.l[1] - f.mid[1]) * ny);
+                sc.halfR[i] = Math.max(0.5 * step, (f.mid[0] - f.r[0]) * nx + (f.mid[1] - f.r[1]) * ny);
+                facing[2 * i] = facing[2 * i + 1] = 1;
               }
             }
           }
@@ -401,6 +440,7 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
             fresh.push(p);
           }
           if (fresh.length === b - a + 1) {
+            if (globalThis.__legTrace) (globalThis.__legLog ||= []).push(['midline', ci, a, b].join(' '));
             for (let i = a; i <= b; i++) sc.pts[i] = fresh[i - a];
             for (let i = Math.max(1, a - 1); i <= Math.min(sc.n - 2, b + 1); i++) {
               const q0 = sc.pts[i - 1], q1 = sc.pts[i + 1];

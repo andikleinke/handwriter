@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.40.0",
+    "tag": "v0.40.0",
+    "date": "2026-10-19",
+    "note": "v0.40.0 — the a's kink: a junction's legs enter along their chord, keep their stroke's width, and the redrawn centreline meets the path; a stretch facing nothing is no junction; the pen's front is a half-disc of the stroke's width"
+  },
+  {
     "version": "0.39.0",
     "tag": "v0.39.0",
     "date": "2026-10-19",
-    "note": "v0.39.0 — export ProRes 4444 with alpha in the browser (FFmpeg in WebAssembly), and place a path point by point in the editor"
+    "note": "in-browser ProRes export; place points"
   },
   {
     "version": "0.38.1",

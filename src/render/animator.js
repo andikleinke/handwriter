@@ -25,7 +25,7 @@ import { cumulativeLengths, pointAtLength } from '../lib/geometry.js';
 import { fontToRaster } from '../lib/raster.js';
 import { buildRevealMaps, HIDDEN, BLEND_EM, NIB_SLACK_PX } from './sweep.js';
 import { buildStrokeProgram, paintRibbon } from './strokeRender.js';
-import { fitProfiles, applyManualWidths, roundTips } from './strokeFit.js';
+import { fitProfiles, applyManualWidths, roundTips, alignRetraces } from './strokeFit.js';
 
 // Soft leading edge of the reveal, in raster px: enough to anti-alias the
 // front, never enough to show ink ahead of the nib.
@@ -95,6 +95,7 @@ export class Animator {
     this._strokesRaw = buildStrokeProgram(this.maps, this._upem(), analysis.glyphs.find((g) => g.raster)?.raster.scale);
     this.fit = fitProfiles(this._strokes, this.maps.sampled, this.chains, analysis.glyphs, this._upem());
     this.fit.manual = applyManualWidths(this._strokes, this.maps.sampled, this.chains, analysis.glyphs, this._upem());
+    this.fit.retraced = alignRetraces(this._strokes, this.chains, this._upem());
     this.fit.rounded = roundTips(this._strokes, this.maps.sampled, this.chains, analysis.glyphs);
     this.rebuildTimeline(false);
     this.resize();

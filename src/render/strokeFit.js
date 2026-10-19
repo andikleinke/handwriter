@@ -20,8 +20,8 @@ import { fontToRaster } from '../lib/raster.js';
 import { piece, rebuildEdges } from './strokeRender.js';
 
 export const FIT_ITERATIONS = 12;
-export const FIT_SMOOTH_EM = 0.015;   // profile smoothing per pass
-export const FIT_MAX_GROW = 0.6;      // a profile may grow this fraction past where it started
+export const FIT_SMOOTH_EM = 0.011;   // profile smoothing per pass (0.015 blurred a stem edge that leaves the path within 0.03 em into a tilt)
+export const FIT_MAX_GROW = 0.6;      // a profile may grow this fraction past where it started (the sweep reads a junction narrow; growth only goes into ink no ribbon covers)
 export const FIT_STEP_PX = 0.5;       // raster pixels an edge moves per pass
 
 /**
@@ -230,7 +230,7 @@ export function roundTips(ribbons, sampled, chains, glyphs) {
       const it = glyphAt(a);
       if (!it || it.role === 'dot' || it.record?.stats?.hand?.pointed) return;
       const w = Math.max(...dirs.map((d) => widthNear(a, d)));
-      const R = w / 2;
+      let R = w / 2;
       if (!(R > 0)) return;
       const d = room(it, rb.pts[a], u, w);
       const back = Math.round(Math.max(0, R - d) / step);
@@ -244,8 +244,16 @@ export function roundTips(ribbons, sampled, chains, glyphs) {
           const r = a === 0 && dir === 1 ? Math.min(R, d + Math.abs(rb.s[k] - rb.s[a])) : 0;
           rb.hl[k] = r; rb.hr[k] = r;
         }
-        if (rb.hl[c] < R) rb.hl[c] = R;
-        if (rb.hr[c] < R) rb.hr[c] = R;
+        // The disc is centred between the ribbon's edges, not on the path:
+        // where the path runs off the stroke's axis (the skeleton of a stem
+        // a bowl closes into) a disc on the path left the far edge stepping
+        // out below it. Its radius is the larger of the stroke's half-width
+        // and the halves here, so the thicker leg at a cusp sets the round.
+        const Rc = Math.max(R, rb.hl[c], rb.hr[c]);
+        const shift = (rb.hl[c] - rb.hr[c]) / 2;
+        const nx = -rb.tan[2 * c + 1], ny = rb.tan[2 * c];
+        rb.pts[c] = [rb.pts[c][0] + nx * shift, rb.pts[c][1] + ny * shift];
+        rb.hl[c] = Rc; rb.hr[c] = Rc;
       }
       n++;
     };
@@ -276,5 +284,57 @@ export function roundTips(ribbons, sampled, chains, glyphs) {
     }
     rebuildEdges(rb);
   });
+  return n;
+}
+
+export const RETRACE_NEAR = 0.3;   // a sample this close (fraction of the stroke width) to an earlier, opposite-running sample is a retrace of it
+export const RETRACE_SKIP_EM = 0.08; // ...looking only at samples at least this much path earlier
+export const RETRACE_SAME = 0.7;    // ...and only when the two passes are within this ratio of width (the same stroke, not a hairline over a shade)
+
+/**
+ * Where a chain runs back over its own ink (a stem written up and down, a
+ * there-and-back entry), the two passes are the same stroke. Their
+ * centrelines sit a few units apart, so their fitted profiles differ by as
+ * much, and the second pass showed as a step in the edge where it left the
+ * first. The later pass takes the earlier pass's edges: for a sample k on
+ * an earlier sample j running the other way, the left edge of k is the
+ * right edge of j and vice versa, the centreline offset accounted for.
+ */
+export function alignRetraces(ribbons, chains, upem) {
+  let n = 0;
+  for (const rb of ribbons) {
+    // a pointed pen's passes over one line are a hairline and a shade: not one stroke
+    const first = chains[rb.chain]?.items?.find((it) => it.type === 'stroke');
+    if (first?.record?.stats?.hand?.pointed) continue;
+    const m = rb.hl.length;
+    const skip = RETRACE_SKIP_EM * upem;
+    const prevL = Float32Array.from(rb.hl), prevR = Float32Array.from(rb.hr);
+    let changed = false;
+    for (let k = 0; k < m; k++) {
+      const w = prevL[k] + prevR[k];
+      if (!(w > 0)) continue;
+      const near = RETRACE_NEAR * w;
+      const tx = rb.tan[2 * k], ty = rb.tan[2 * k + 1];
+      let best = -1, bd = near;
+      for (let j = 0; j < m; j++) {
+        if (rb.s[k] - rb.s[j] < skip) break; // samples are in path order
+        const d = Math.hypot(rb.pts[j][0] - rb.pts[k][0], rb.pts[j][1] - rb.pts[k][1]);
+        if (d < bd && tx * rb.tan[2 * j] + ty * rb.tan[2 * j + 1] < -0.8) { bd = d; best = j; }
+      }
+      if (best < 0) continue;
+      const j = best;
+      // the same stroke, not a hairline running back over a shade (a pointed
+      // pen's upstroke over its downstroke): the two passes must be of a width
+      const wj = prevL[j] + prevR[j];
+      if (wj < RETRACE_SAME * w || w < RETRACE_SAME * wj) continue;
+      const nx = -rb.tan[2 * j + 1], ny = rb.tan[2 * j];           // j's left normal
+      const off = nx * (rb.pts[k][0] - rb.pts[j][0]) + ny * (rb.pts[k][1] - rb.pts[j][1]); // k's centre, measured from j's along j's left
+      // k runs the other way: its left is j's right. Its left edge must land
+      // on j's right edge, its right edge on j's left edge
+      const hl = prevR[j] + off, hr = prevL[j] - off;
+      if (hl > 0.5 && hr > 0.5) { rb.hl[k] = hl; rb.hr[k] = hr; changed = true; n++; }
+    }
+    if (changed) rebuildEdges(rb);
+  }
   return n;
 }

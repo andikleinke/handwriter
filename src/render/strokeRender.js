@@ -167,9 +167,9 @@ export function paintRibbon(ctx, rb, p, toCss, ink, cacheKey = null) {
     const o = toCss(pts[0]), ox = toCss([pts[0][0] + 1, pts[0][1]]);
     const sc = Math.hypot(ox[0] - o[0], ox[1] - o[1]);
     const RAD = rb.rad ? Array.from(rb.rad, (v) => v * sc) : null;
-    rb._cache = { key: cacheKey, L, R, C, RAD, chunks: new Map() };
+    rb._cache = { key: cacheKey, L, R, C, RAD, sc, chunks: new Map() };
   }
-  const { L, R, C, RAD, chunks } = rb._cache;
+  const { L, R, C, RAD, sc, chunks } = rb._cache;
   let m = 0;
   const whole = p === Infinity || p >= s[n - 1];
   if (whole) m = n - 1;
@@ -194,5 +194,35 @@ export function paintRibbon(ctx, rb, p, toCss, ink, cacheKey = null) {
   const Lp = L.slice(k0, m + 1).concat([lF]), Rp = R.slice(k0, m + 1).concat([rF]), Cp = C.slice(k0, m + 1).concat([cF]);
   const Rp2 = RAD ? RAD.slice(k0, m + 1).concat([RAD[Math.min(n - 1, m + 1)] != null && !whole && m + 1 < n ? RAD[m] + (RAD[m + 1] - RAD[m]) * ((p - s[m]) / (s[m + 1] - s[m] || 1)) : RAD[m]]) : null;
   ctx.fill(piece(Lp, Rp, Cp, 0, Lp.length - 1, Rp2), 'nonzero');
+  // The nib's front: the ribbon's own next half-width of path, clipped to
+  // the disc that spans the cross-section at the front. The per-sample disc
+  // is centred on the path with the smaller half-width, so where the profile
+  // is asymmetric (one side cut at a junction, a shade) the front was a
+  // straight edge with a smaller round on it; a bare full-width disc bulged
+  // past the outer edge on a bend and vanished again as the pen moved on.
+  // Clipping the ink still to come keeps the front round and inside the
+  // stroke, so nothing shows that is not drawn for good a moment later.
+  if (!whole && m + 1 < n) {
+    const mx = (lF[0] + rF[0]) / 2, my = (lF[1] + rF[1]) / 2;
+    const r = Math.hypot(lF[0] - rF[0], lF[1] - rF[1]) / 2;
+    if (r > 0.3) {
+      const ahead = Math.min(s[n - 1], p + r / sc);
+      let m2 = m;
+      while (m2 + 1 < n && s[m2 + 1] <= ahead) m2++;
+      let lA = L[m2], rA = R[m2], cA = C[m2];
+      if (m2 + 1 < n) {
+        const t2 = (ahead - s[m2]) / (s[m2 + 1] - s[m2] || 1);
+        const lerp2 = (a, b) => [a[0] + (b[0] - a[0]) * t2, a[1] + (b[1] - a[1]) * t2];
+        lA = lerp2(L[m2], L[m2 + 1]); rA = lerp2(R[m2], R[m2 + 1]); cA = lerp2(C[m2], C[m2 + 1]);
+      }
+      const La = [lF, ...L.slice(m + 1, m2 + 1), lA], Ra = [rF, ...R.slice(m + 1, m2 + 1), rA], Ca = [cF, ...C.slice(m + 1, m2 + 1), cA];
+      const clip = new Path2D();
+      clip.arc(mx, my, r, 0, Math.PI * 2);
+      ctx.save();
+      ctx.clip(clip);
+      ctx.fill(piece(La, Ra, Ca, 0, La.length - 1), 'nonzero');
+      ctx.restore();
+    }
+  }
   ctx.restore();
 }
