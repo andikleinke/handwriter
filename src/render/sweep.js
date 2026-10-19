@@ -35,6 +35,8 @@ export const NIB_MIN_EM = 0.08;     // the nib's radius is read from the ink ove
 export const NIB_PERCENTILE = 0.75; // ...at this percentile of it: a crossing's swell is outvoted, a shade's own is not
 export const CROSS_CAP = 1.8;       // how far past that radius the measured cross-section may reach
 export const CROSS_SLEW = 0.35;     // ...and how fast it may widen along the path (font units per unit travelled)
+export const HAIRPIN_GAP_EM = 0.02;  // samples of one chain this much path apart, running opposite ways, are its two legs at a hairpin: another pass
+export const HAIRPIN_DOT = -0.7;     // ...if their tangents are this reversed (any closer to parallel, and a pointed pen's hairline crossing back over its shade counted: Pinyon's x went from 15 to 22 % XOR)
 export const JUNCTION_MAX_EM = 0.3;  // a crossing this short is redrawn straight through; longer is a retrace
 export const JUNCTION_NEAR_EM = 0.15; // this far into a retrace the pen still has the width it arrived with
 export const JUNCTION_EDGE_EM = 0.05; // ...and this far in, its clean edge continues as a straight line
@@ -206,6 +208,7 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
   const items = (sc, k) => chains[sampled.indexOf(sc)]?.items[sc.item[k]]?.type;
   const margin = 2 * step;
   const minGap = 0.12 * upem;
+  const hairpinGap = HAIRPIN_GAP_EM * upem;
   let cell = margin;
   for (const sc of sampled) for (let k = 0; k < sc.n; k++) cell = Math.max(cell, sc.halfL[k], sc.halfR[k]);
   cell *= 3;
@@ -232,6 +235,7 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
   sampled.forEach((sc, ci) => {
     // which side of the path the other pass lies on, per sample
     const sides = [new Uint8Array(sc.n), new Uint8Array(sc.n)]; // [left, right]
+    const lean = new Float32Array(sc.n); // signed sum of how far across the other pass lies (left positive), for a leg's dominant side
     const junction = new Uint8Array(sc.n);
     for (let k = 0; k < sc.n; k++) {
       const [x, y] = sc.pts[k];
@@ -245,7 +249,15 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
           for (let i = 0; i < b.length; i += 2) {
             const cj = b[i], j = b[i + 1];
             const o = sampled[cj];
-            if (cj === ci && Math.abs(o.s[j] - sc.s[k]) < minGap) continue;
+            if (cj === ci) {
+              // neighbouring samples never count - except across a hairpin,
+              // where the chain runs back beside itself within far less than
+              // minGap: the `a`'s stem starts 40 units of path after its
+              // bowl's closing stroke ends, merged with it, and each read the
+              // union's width (and a nib radius read in the union) as its own
+              const gap = Math.abs(o.s[j] - sc.s[k]);
+              if (gap < minGap && !(gap >= hairpinGap && tx * o.tan[2 * j] + ty * o.tan[2 * j + 1] < HAIRPIN_DOT)) continue;
+            }
             const dx = o.pts[j][0] - x, dy = o.pts[j][1] - y;
             const limit = 1.5 * (reach + Math.max(o.halfL[j], o.halfR[j])) + margin;
             if (dx * dx + dy * dy >= limit * limit) continue;
@@ -257,6 +269,7 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
             if (Math.abs(along) > margin) continue;
             if (across >= 0 && across <= sc.halfL[k] + step) sides[0][k] = 1;
             if (across <= 0 && -across <= sc.halfR[k] + step) sides[1][k] = 1;
+            if (Math.abs(across) <= reach + step) lean[k] += across;
           }
         }
       }
@@ -340,7 +353,7 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
       for (let i = k + 1; i <= e; i++) {
         // a new plan item (a bridge, or the stroke it lands on) is a new leg
         // with nothing carried over: the letter's entry has its own width
-        if (sc.item[i] !== sc.item[i - 1]) { legs.push([start, i - 1, hairpin]); start = i; hairpin = true; continue; }
+        if (sc.item[i] !== sc.item[i - 1]) { legs.push([start, i - 1, hairpin]); start = i; hairpin = 'item'; continue; }
         if (i < k + turn || i - turn < start) continue;
         const dot = sc.tan[2 * i] * sc.tan[2 * (i - turn)] + sc.tan[2 * i + 1] * sc.tan[2 * (i - turn) + 1];
         if (dot >= 0.5) continue;
@@ -349,6 +362,10 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
       }
       legs.push([start, e, hairpin]);
       let carriedR = null, carriedHalf = null;
+      // the width the pen takes out of the stretch, for a leg that has
+      // nothing brought in: past a hairpin it is on the other stroke, whose
+      // width is read where that stroke runs clean again
+      const exit = e + 1 < sc.n ? clean(e + 1, 1) : null;
       // the direction a leg runs in, end to end: past a corner inside the
       // stretch the sample's own tangent is mid-turn (the `a`'s stem, cut
       // just under the apex, read a tangent 60 degrees off the stem and the
@@ -373,11 +390,20 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
         // brought in (the previous leg was a hairpin's, on another stroke),
         // the width the pen takes out is the stroke's: eight pixels coming
         // out, eight all the way through.
+        // A hairpin's two legs: the one leading into the apex is still the
+        // stroke that came in and keeps its width; the one leaving is the
+        // other stroke, with the width the pen takes out. Neither is
+        // redrawn (no `after` until the last leg), but each is `near` its
+        // entry all along, so where a reading runs into the other leg's ink
+        // its halves are its stroke's, against its free edge, not the union's.
+        const hairpinLeg = !pointed && afterHairpin === true && b < e; // a turn, not a new plan item (a pointed pen's hairpin is a hairline turning in a shade: left to the rules below)
+        const firstHairpin = !legs.some((l) => l[2] === true && l[0] < a);
         const before = a === k ? (k > 0 ? clean(k - 1, -1) : null)
-          : afterHairpin ? null
-            : { half: carriedHalf || after?.half || [sc.halfL[a - 1], sc.halfR[a - 1]], R: carriedR, tan: chordOf(a - 1, Math.min(b + 1, sc.n - 1)) };
+          : hairpinLeg ? (firstHairpin && carriedHalf ? { half: carriedHalf, R: carriedR, tan: chordOf(a - 1, b) } : exit ? { half: exit.half, R: exit.R, tan: chordOf(a - 1, b) } : null)
+            : afterHairpin ? null
+              : { half: carriedHalf || after?.half || [sc.halfL[a - 1], sc.halfR[a - 1]], R: carriedR, tan: chordOf(a - 1, Math.min(b + 1, sc.n - 1)) };
         // the nib radius where this stroke came in, carried through its corners
-        if (before) { carriedR = before.R; carriedHalf = before.half; } else carriedHalf = null;
+        if (before && !hairpinLeg) { carriedR = before.R; carriedHalf = before.half; } else carriedHalf = null;
         const s0 = sc.s[a > 0 ? a - 1 : a], s1 = sc.s[b + 1 < sc.n ? b + 1 : b];
         const short = before && after && sc.s[b] - sc.s[a] <= JUNCTION_MAX_EM * upem;
         // Through a crossing each EDGE of the stroke continues as a line
@@ -452,10 +478,21 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
           }
         }
         if (edged) continue;
+        // Which side of this leg the other pass lies on, over the whole leg:
+        // where two merged strokes share one skeleton (a hairpin's legs, the
+        // stem under the `a`'s apex) the other pass is a unit or two to
+        // either side of each sample, and the side it is read on is noise;
+        // further along the leg it lies clearly to one side.
+        let leanSum = 0;
+        for (let i = a; i <= b; i++) leanSum += lean[i];
+        const dominant = !pointed && Math.abs(leanSum) > 2 * step ? (leanSum > 0 ? 0 : 1) : -1;
         halves.forEach((half, side) => {
           for (let i = a; i <= b; i++) {
             const w0 = before?.half[side], w1 = after?.half[side];
-            const other = sides[side][i], atEdge = sc.edge[2 * i + side], read = raw[side][i];
+            const ambiguous = junction[i] && dominant >= 0 && (sides[0][i] === sides[1][i] || Math.abs(lean[i]) < 2 * step);
+            const other = ambiguous ? (side === dominant ? 1 : 0) : sides[side][i];
+            const otherSide = ambiguous ? (side === dominant ? 0 : 1) : sides[1 - side][i];
+            const atEdge = sc.edge[2 * i + side], read = raw[side][i];
             // how far this sample is from the leg's clean approach / departure
             const dIn = before ? sc.s[i] - sc.s[a] : Infinity, dOut = after ? sc.s[b] - sc.s[i] : Infinity;
             const near = short || Math.min(dIn, dOut) <= JUNCTION_NEAR_EM * upem;
@@ -463,12 +500,16 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
             // taken out; just inside a long stretch: the clean edge continued
             // as a straight line (the bar of a `J` keeps its edge where it
             // passes over the stem, whatever its centreline does there)
-            let own = null;
-            if (short) own = w0 + (w1 - w0) * ((sc.s[i] - s0) / (s1 - s0 || 1));
-            else if (near) {
+            let own = null, total = null;
+            if (short) {
+              own = w0 + (w1 - w0) * ((sc.s[i] - s0) / (s1 - s0 || 1));
+              const t0 = before.half[0] + before.half[1], t1 = after.half[0] + after.half[1];
+              total = t0 + (t1 - t0) * ((sc.s[i] - s0) / (s1 - s0 || 1));
+            } else if (near) {
               const fromStart = dIn <= dOut;
               const ref = fromStart ? before : after;
               own = ref.half[side];
+              total = ref.half[0] + ref.half[1];
               if (Math.min(dIn, dOut) <= JUNCTION_EDGE_EM * upem) {
                 // close to the clean run its edge is continued as a straight
                 // line (further out the run may be curving away)
@@ -480,6 +521,14 @@ function capWidthsAtJunctions(sampled, step, upem, glyphs, chains) {
                 own = Math.max(0.5 * step, d) + EDGE_BIAS_PX * step; // the bias is taken off again below
               }
             }
+            // Where this side faces the other pass and the other side is the
+            // stroke's own free edge (its reading reached background with
+            // nothing beyond), the stroke is its width from that edge: a path
+            // that runs up the middle of two merged strokes (the `a`'s bowl
+            // closing into its stem) puts each stroke against its own outer
+            // edge, not centred on the path with half its width in the other.
+            const oside = 1 - side;
+            if (!pointed && own !== null && other && !otherSide && sc.edge[2 * i + oside]) own = Math.max(0.5 * step, total - raw[oside][i]);
             let v;
             if (pointed && w0 !== undefined && before.R && sc.R[i] > THIN_IN_THICK * before.R && sc.tan[2 * i + 1] > -0.3) {
               // a pointed pen's upstroke, come in where the ink was much thinner

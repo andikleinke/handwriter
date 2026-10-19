@@ -1211,6 +1211,46 @@ straight cut plus the nib's smaller disc, is now a half-disc of the
 stroke's width there: the ribbon's next samples clipped to that disc
 (`paintRibbon`), so the front neither leads the pen nor shows a shoulder.
 
+## The `a`'s apex: two strokes on one skeleton (v0.41.0)
+
+What was left at the top of the `a` after v0.40.0: a tip disc of the
+merged blob's radius, overhanging the stem's right edge, and a step in
+that edge under it. The bowl's closing stroke and the stem merge there,
+and the recovered path is the skeleton of their union, one line up the
+middle of both. Every reading on it was the union's: 50 units wide for a
+stem of 33, with the nib radius read in the same union.
+
+- **A hairpin's legs are another pass.** Samples of one chain within
+  0.12 em of path were never "another pass" of the pen, so the two legs
+  never saw each other. Now they do once they are 0.02 em of path apart
+  and run opposite ways (`HAIRPIN_GAP_EM`, `HAIRPIN_DOT`); any looser
+  rule on the tangents counted a pointed pen's hairline crossing back
+  over its shade, and Pinyon's `x` went from 15 to 22 %.
+- **Each stroke sits against its own free edge.** Where a sample's one
+  side faces the other pass and its other side's reading reached
+  background, the stroke is its own width measured in from that free
+  edge, not half its width either side of a path that runs up the middle
+  of two strokes. The stem's east half under the apex is 24 (its real
+  edge), its west half 9; the closing stroke the mirror of that.
+- **A leg's facing side is decided over the whole leg.** Where the two
+  legs share one skeleton the other pass lies a unit or two to either
+  side of each sample, and the side it is read on is noise: the side is
+  taken from the sum over the leg of how far across the other pass lies.
+- **A hairpin's legs keep their stroke's width.** The leg into the apex
+  keeps the width its stroke brought in, the leg out of it the width
+  the pen takes out, in place of the union readings they had.
+- **Each leg gets its own tip disc** at a hairpin (`roundTips`), of its
+  own stroke's radius, centred between its own edges, so the stem's cap
+  is flush with the stem.
+
+All of this is for round pens; a pointed pen's hairpins are a hairline
+turning inside a shade and stay under the rules they had. Measured at
+1920 px: the stem's right edge now runs straight into its cap; the `a`
+reads 9.9 % (9.7 before: the cap is still a round on a letter whose top
+is a slanted cut), Autography's `m` 13.8 → 12.7 and `he` 8.2 → 7.9, Ms
+Madi's `n` 9.3 → 9.0, Pinyon unchanged; every case fully connected,
+at most 5 px vanishing (Autography `x`, 2 before).
+
 ## Recording
 
 **● Record** (next to Play) analyses the text field first if it changed,

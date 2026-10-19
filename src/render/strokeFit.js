@@ -32,7 +32,7 @@ export const FIT_STEP_PX = 0.5;       // raster pixels an edge moves per pass
  * @param {number} upem
  */
 export function fitProfiles(ribbons, sampled, chains, glyphs, upem, opts = {}) {
-  const iterations = opts.iterations ?? FIT_ITERATIONS;
+  const iterations = opts.iterations ?? globalThis.__fitIter ?? FIT_ITERATIONS;
   const canvases = glyphs.map((g) => {
     if (!g.raster) return null;
     const c = document.createElement('canvas');
@@ -229,12 +229,17 @@ export function roundTips(ribbons, sampled, chains, glyphs) {
     const hold = (a, dirs, u) => {
       const it = glyphAt(a);
       if (!it || it.role === 'dot' || it.record?.stats?.hand?.pointed) return;
-      const w = Math.max(...dirs.map((d) => widthNear(a, d)));
-      let R = w / 2;
-      if (!(R > 0)) return;
+      // each leg's own radius: at a hairpin where two strokes merge (the
+      // `a`'s bowl closing into its stem) the legs differ in width, and one
+      // disc of the wider's radius bulged past the narrower's edge
+      const ws = dirs.map((d) => widthNear(a, d));
+      const w = Math.max(...ws);
+      if (!(w / 2 > 0)) return;
       const d = room(it, rb.pts[a], u, w);
-      const back = Math.round(Math.max(0, R - d) / step);
-      for (const dir of dirs) {
+      for (const [di, dir] of dirs.entries()) {
+        const R = ws[di] / 2;
+        if (!(R > 0)) continue;
+        const back = Math.round(Math.max(0, R - d) / step);
         const c = Math.max(0, Math.min(m - 1, a + dir * back));
         for (let k = a; k !== c; k += dir) {
           // at a start the nib's footprint grows from the touch-down point: a
@@ -247,13 +252,14 @@ export function roundTips(ribbons, sampled, chains, glyphs) {
         // The disc is centred between the ribbon's edges, not on the path:
         // where the path runs off the stroke's axis (the skeleton of a stem
         // a bowl closes into) a disc on the path left the far edge stepping
-        // out below it. Its radius is the larger of the stroke's half-width
-        // and the halves here, so the thicker leg at a cusp sets the round.
-        const Rc = Math.max(R, rb.hl[c], rb.hr[c]);
+        // out below it. Its radius is the stroke's, read a little way from
+        // the tip, not the halves here: at a hairpin those are the union of
+        // the two legs (the `a`'s apex: 24 each for a stroke of 16), and a
+        // disc of the union's radius bulged past the stem's edge under it.
         const shift = (rb.hl[c] - rb.hr[c]) / 2;
         const nx = -rb.tan[2 * c + 1], ny = rb.tan[2 * c];
         rb.pts[c] = [rb.pts[c][0] + nx * shift, rb.pts[c][1] + ny * shift];
-        rb.hl[c] = Rc; rb.hr[c] = Rc;
+        rb.hl[c] = R; rb.hr[c] = R;
       }
       n++;
     };
