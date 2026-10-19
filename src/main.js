@@ -352,30 +352,95 @@ let letterMode = null;            // the letter being edited on its own, or null
 let surveyGeneration = 0;         // bumped to abandon a survey in flight
 const letterVerdicts = new Map(); // `${fontKey}|${letter}` -> {failures, strokes}
 
+/*
+ * A verdict is kept across sessions, since reaching it is a full recovery
+ * of the glyph (about a second for a swash capital, with the page frozen
+ * meanwhile), and it only changes when the record does: the heuristic
+ * record with the recovery's version and the raster size, a corrected
+ * record with its own contents.
+ */
+const VERDICT_STORE = 'handwriter.verdicts';
+const CHECK_VERSION = 1; // bump when fontCheck.js changes what it reports
+let verdictCache = null;
+function loadVerdictCache() {
+  if (verdictCache) return verdictCache;
+  try { verdictCache = JSON.parse(localStorage.getItem(VERDICT_STORE) || '{}'); } catch { verdictCache = {}; }
+  return verdictCache;
+}
+let verdictSaveTimer = 0;
+function saveVerdictCache() {
+  clearTimeout(verdictSaveTimer);
+  verdictSaveTimer = setTimeout(() => {
+    try { localStorage.setItem(VERDICT_STORE, JSON.stringify(verdictCache)); } catch { /* storage may be off or full */ }
+  }, 500);
+}
+function hashText(t) {
+  let h = 2166136261;
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+/** What a letter's verdict depends on; the verdict is stale when this changes. */
+function verdictStamp(key, ch, rasterEm) {
+  const gid = fontCtx.ot?.charToGlyphIndex(ch) ?? 0;
+  const own = store.isManual(key, gid) || store.isBundled(key, gid) ? hashText(JSON.stringify(store.get(key, gid))) : 'auto';
+  return `${CHECK_VERSION}|${RECORD_VERSION}|${rasterEm}|${own}`;
+}
+function rememberVerdict(key, ch, rasterEm, v) {
+  letterVerdicts.set(`${key}|${ch}`, v);
+  const cache = loadVerdictCache();
+  (cache[key] ||= {})[ch] = { stamp: verdictStamp(key, ch, rasterEm), ...v };
+  saveVerdictCache();
+}
+function recallVerdict(key, ch, rasterEm) {
+  const hit = loadVerdictCache()[key]?.[ch];
+  if (!hit || hit.stamp !== verdictStamp(key, ch, rasterEm)) return null;
+  return { failures: hit.failures, strokes: hit.strokes };
+}
+
+/** The chip's look for one letter: its classes and the tooltip. */
+function chipState(key, ch) {
+  const gid = fontCtx.ot?.charToGlyphIndex(ch) ?? 0;
+  if (!gid) return null;
+  const edited = store.isManual(key, gid);
+  const bundled = !edited && store.isBundled(key, gid);
+  const v = letterVerdicts.get(`${key}|${ch}`);
+  const cls = ['lchip'];
+  if (ch === letterMode) cls.push('sel');
+  if (edited) cls.push('edited');
+  if (bundled) cls.push('bundled');
+  if (!v) cls.push('pending');
+  else if (v.failures.length) cls.push('bad');
+  const title = [
+    edited ? 'hand-edited' : bundled ? 'corrected in the bundled hand' : 'as recovered',
+    v ? `${v.strokes} stroke${v.strokes === 1 ? '' : 's'}` : 'not checked yet',
+    ...(v?.failures ?? []),
+  ].join(' · ');
+  return { cls: cls.join(' '), title };
+}
+
+/**
+ * The strip is built once per font and its chips are then updated in
+ * place: rebuilding it while the survey runs replaced the button under the
+ * pointer between pointerdown and pointerup, and the click went nowhere.
+ */
 function paintLetterStrip() {
   if (el.letterpanel.hidden || !fontCtx) return;
   const key = fontKeyOf(fontCtx);
-  el.letterstrip.innerHTML = [...LETTERS]
-    .map((ch) => {
-      const gid = fontCtx.ot?.charToGlyphIndex(ch) ?? 0;
-      if (!gid) return '';
-      const edited = store.isManual(key, gid);
-      const bundled = !edited && store.isBundled(key, gid);
-      const v = letterVerdicts.get(`${key}|${ch}`);
-      const cls = ['lchip'];
-      if (ch === letterMode) cls.push('sel');
-      if (edited) cls.push('edited');
-      if (bundled) cls.push('bundled');
-      if (!v) cls.push('pending');
-      else if (v.failures.length) cls.push('bad');
-      const title = [
-        edited ? 'hand-edited' : bundled ? 'corrected in the bundled hand' : 'as recovered',
-        v ? `${v.strokes} stroke${v.strokes === 1 ? '' : 's'}` : 'not checked yet',
-        ...(v?.failures ?? []),
-      ].join(' · ');
-      return `<button class="${cls.join(' ')}" data-ch="${ch}" title="${escapeHtml(title)}">${ch}</button>`;
-    })
-    .join('');
+  if (el.letterstrip.dataset.key !== key) {
+    el.letterstrip.dataset.key = key;
+    el.letterstrip.innerHTML = [...LETTERS]
+      .map((ch) => (chipState(key, ch) ? `<button class="lchip" data-ch="${ch}">${ch}</button>` : ''))
+      .join('');
+  }
+  for (const ch of LETTERS) paintChip(ch, key);
+}
+function paintChip(ch, key = fontKeyOf(fontCtx)) {
+  const b = el.letterstrip.querySelector(`button[data-ch="${ch}"]`);
+  if (!b) return;
+  const st = chipState(key, ch);
+  if (!st) return;
+  if (b.className !== st.cls) b.className = st.cls;
+  if (b.title !== st.title) b.title = st.title;
 }
 
 /** Re-check one letter after it was edited, so its chip tells the truth again. */
@@ -384,17 +449,49 @@ function refreshLetterVerdict(ch) {
   const k = `${fontKeyOf(fontCtx)}|${ch}`;
   letterVerdicts.delete(k);
   if (el.letterpanel.hidden) return;
+  const rasterEm = clampInt(el.rasterEm.value, 128, 1024, 512);
   try {
-    const a = analyzeWord(fontCtx, ch, store, {
-      rasterEm: clampInt(el.rasterEm.value, 128, 1024, 512),
-      connect: false,
-    });
+    const a = analyzeWord(fontCtx, ch, store, { rasterEm, connect: false });
     const chk = checkAnalysis(a);
-    letterVerdicts.set(k, { failures: chk.failures, strokes: chk.glyphs[0]?.strokes ?? 0 });
+    rememberVerdict(fontKeyOf(fontCtx), ch, rasterEm, { failures: chk.failures, strokes: chk.glyphs[0]?.strokes ?? 0 });
   } catch (err) {
     console.error(err);
   }
-  paintLetterStrip();
+  paintChip(ch);
+}
+
+// The survey waits while the user is at the page: a pointer down in the
+// workbench, a key, a letter open for editing. Each letter's recovery is
+// synchronous and freezes the page for up to a second, so it is only run
+// when the browser reports idle time and nothing has happened for a moment.
+let userBusyUntil = 0;
+const noteUserActivity = () => { userBusyUntil = performance.now() + 600; };
+for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel']) document.addEventListener(ev, noteUserActivity, { passive: true, capture: true });
+const whenIdle = () => new Promise((resolve) => {
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(() => resolve(), { timeout: 400 });
+  else setTimeout(resolve, 16);
+});
+async function surveyPause(gen) {
+  for (;;) {
+    await whenIdle();
+    if (gen !== surveyGeneration) return false;
+    if (!letterMode && performance.now() >= userBusyUntil && !document.hidden) return true;
+    await new Promise((r) => setTimeout(r, 250));
+    if (gen !== surveyGeneration) return false;
+  }
+}
+function paintSurveyProgress(done, total) {
+  const pct = Math.round((100 * done) / total);
+  sayLetters(`checking the alphabet… ${done}/${total}`);
+  let bar = el.letterinfo.querySelector('.survey');
+  if (!bar) {
+    bar = document.createElement('span');
+    bar.className = 'survey';
+    bar.innerHTML = '<i></i>';
+    bar.title = 'each letter not checked before is recovered once and its verdict kept; the check waits while you work';
+    el.letterinfo.appendChild(bar);
+  }
+  bar.firstChild.style.width = `${pct}%`;
 }
 
 /** Check every letter in the background, newest verdict first onto the strip. */
@@ -403,26 +500,34 @@ async function surveyLetters() {
   const key = fontKeyOf(fontCtx);
   const opts = { rasterEm: clampInt(el.rasterEm.value, 128, 1024, 512), connect: false };
   let done = 0, bad = 0;
+  // verdicts kept from an earlier session come back at once
+  for (const ch of LETTERS) {
+    const k = `${key}|${ch}`;
+    if (letterVerdicts.has(k)) continue;
+    const kept = recallVerdict(key, ch, opts.rasterEm);
+    if (kept) { letterVerdicts.set(k, kept); paintChip(ch, key); }
+  }
+  const todo = [...LETTERS].filter((ch) => !letterVerdicts.has(`${key}|${ch}`));
+  if (todo.length) paintSurveyProgress(LETTERS.length - todo.length, LETTERS.length);
   for (const ch of LETTERS) {
     if (gen !== surveyGeneration || !fontCtx) return;
     const k = `${key}|${ch}`;
     if (!letterVerdicts.has(k)) {
-      // yield first: the recovery is synchronous and would otherwise freeze the page
-      await new Promise((r) => setTimeout(r, 0));
-      if (gen !== surveyGeneration || !fontCtx) return;
+      // the recovery is synchronous: wait for idle time and a quiet user
+      if (!(await surveyPause(gen)) || !fontCtx) return;
       try {
         const a = analyzeWord(fontCtx, ch, store, opts);
         const chk = checkAnalysis(a);
-        letterVerdicts.set(k, { failures: chk.failures, strokes: chk.glyphs[0]?.strokes ?? 0 });
+        rememberVerdict(key, ch, opts.rasterEm, { failures: chk.failures, strokes: chk.glyphs[0]?.strokes ?? 0 });
       } catch (err) {
         console.error(err);
         letterVerdicts.set(k, { failures: [], strokes: 0 });
       }
-      paintLetterStrip();
+      paintChip(ch, key);
     }
     done++;
     if (letterVerdicts.get(k)?.failures.length) bad++;
-    sayLetters(`checking the alphabet… ${done}/${LETTERS.length}`);
+    if (todo.length) paintSurveyProgress(done, LETTERS.length);
   }
   sayLetters(bad
     ? `${bad} of ${LETTERS.length} letters have something to answer for - click one to see and correct it`

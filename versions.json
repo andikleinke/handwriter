@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.42.0",
+    "tag": "v0.42.0",
+    "date": "2026-10-19",
+    "note": "v0.42.0 — Letter Studio's alphabet check runs in idle time, keeps its verdicts, waits while you work, shows its progress, and no longer swallows clicks"
+  },
+  {
     "version": "0.41.0",
     "tag": "v0.41.0",
     "date": "2026-10-19",

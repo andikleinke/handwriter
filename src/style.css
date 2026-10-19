@@ -421,6 +421,18 @@ button.ghost.active { color: var(--accent); border-color: var(--accent); }
 .lchip.bad { border-color: #c2410c; color: #c2410c; }
 .lchip.pending { opacity: .55; }
 #letterinfo { margin-bottom: 6px; }
+/* the alphabet check's progress, beside its count */
+#letterinfo .survey {
+  display: inline-block;
+  vertical-align: middle;
+  width: 120px;
+  height: 6px;
+  margin-left: 8px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+#letterinfo .survey i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 
 .handtools {
   display: flex;

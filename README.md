@@ -1251,6 +1251,44 @@ is a slanted cut), Autography's `m` 13.8 → 12.7 and `he` 8.2 → 7.9, Ms
 Madi's `n` 9.3 → 9.0, Pinyon unchanged; every case fully connected,
 at most 5 px vanishing (Autography `x`, 2 before).
 
+## The alphabet check, in the background (v0.42.0)
+
+When Letter Studio opens it checks every letter of the alphabet against
+the pointed-pen rules (`fontCheck.js`): a pointed pen writes its shades
+downward, so a recovered path that pushes a shade upward is written
+against the rules, and a chip turns red when more than 0.06 em of such
+ink is written in the letter (the tooltip quotes the amount: "1272u of
+ink written against the pointed-pen rules"). Lowercase letters mostly
+pass; the swash capitals of a face like Pinyon fail more often, which is
+why the capitals went red one by one. For a round-nib face the rule does
+not apply and no chip turns red. Reaching a verdict is a full recovery of
+the glyph, and a swash capital takes up to five seconds of it, during
+which the page cannot respond; the check ran one letter after another
+from the moment the studio opened, and the strip was rebuilt after every
+letter, so a click that began on a chip ended on a new button and went
+nowhere. That is what "I can't select the x" was.
+
+- **The strip is built once per font and its chips updated in place**,
+  so a click lands on the button it started on, check or no check.
+- **Verdicts are kept** (`localStorage`, `handwriter.verdicts`), stamped
+  with what they depend on: the check's and the recovery's version, the
+  raster size, and for a corrected letter the record's own contents. A
+  face is surveyed once; afterwards the studio opens with every verdict
+  in place, and only a letter you edit is checked again.
+- **The check waits for you.** Each letter is checked only in the
+  browser's idle time, when no pointer, key or wheel event has arrived
+  for 0.6 s, and never while a letter is open for editing or the tab is
+  hidden. Click a letter and the check stands still until you leave it.
+- **A progress bar** beside the count shows how far the check has got.
+
+What it does not do: the recovery itself is still synchronous, so the
+page still stalls for the length of one letter's recovery while the
+check runs (up to five seconds on a Pinyon capital, well under a second
+on most letters). Moving the recovery into a worker would end that; it
+needs the font and HarfBuzz loaded there and the raster drawn on an
+`OffscreenCanvas`, and is the next step if the stalls still get in the
+way.
+
 ## Recording
 
 **● Record** (next to Play) analyses the text field first if it changed,
