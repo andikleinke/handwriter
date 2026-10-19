@@ -197,11 +197,12 @@ Open http://localhost:5173.
    raster + skeleton figures.
 7. There too, **Copy** / **Download** the JSON to see the cacheable data layer.
 
-The page (v0.38.0) is two cards: the preview with a side panel to its
-left (text, font, connect letters, Analyze; speed, pen tip, natural speed,
-loop, Export movie), and a workbench with three tabs — **Pen paths** (the recovered
-paths and the editor), **Letter Studio** (the same view with the alphabet
-strip above it) and **Advanced** (everything a first look does not need:
+The page (v0.45.0) is two cards and a fold: the preview with a side panel
+a quarter of the width to its left (Text, Font with *Add…* beside it,
+**Animate**; Avg speed, Connect letters, Pen tip, Natural speed, Loop; the
+movie format and **Export**), the **Letter Studio** workbench (the alphabet
+strip, the editor beside the view) and, at the foot of the page,
+**Advanced**, closed by default (everything a first look does not need:
 settings, diagnostics, the log and the stroke data). **Check in-browser
 video encoding** under Advanced asks the browser's WebCodecs whether it
 could encode HEVC or VP9 with an alpha channel itself (Safari and Chrome
@@ -1338,6 +1339,14 @@ direction*, *Delete stroke* / *Re-run this glyph*, *Deselect*.
 closed by default: raster size, renderer, the raster and skeleton
 figures, the stroke cache, the font and shaping lines, the video-encoding
 probe, the uncertainty log and the stroke data.
+
+## The side panel, tightened (v0.45.0)
+
+The panel beside the preview is a quarter of the width (was a third):
+*Add…* sits beside the font picker, the four checkboxes (Connect letters,
+Pen tip, Natural speed, Loop) share one row under the speed slider with
+capitalised labels, **Analyze** is **Animate** and **Export movie** is
+**Export**.
 
 ## Recording
 

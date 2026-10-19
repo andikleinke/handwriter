@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.45.0",
+    "tag": "v0.45.0",
+    "date": "2026-10-19",
+    "note": "v0.45.0 — the side panel a quarter wide: Add beside the font picker, the checkboxes under the speed slider, Animate and Export"
+  },
+  {
     "version": "0.44.0",
     "tag": "v0.44.0",
     "date": "2026-10-19",

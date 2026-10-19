@@ -713,7 +713,7 @@ el.handfile.addEventListener('change', async (e) => {
 /** Show one letter on its own for editing, or `null` to go back to the text. */
 function setLetterMode(ch) {
   letterMode = ch;
-  el.text.title = ch ? 'showing a single letter (Letter Studio); type here or press Analyze to write text again' : '';
+  el.text.title = ch ? 'showing a single letter (Letter Studio); type here or press Animate to write text again' : '';
   paintLetterStrip();
   run();
 }

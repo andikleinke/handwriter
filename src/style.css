@@ -496,7 +496,10 @@ button.tall { align-self: flex-end; }
 #advanced .json { max-height: 320px; }
 
 /* ------------------------------------------ side panel beside the preview -- */
-.studio-top { display: grid; grid-template-columns: minmax(250px, 1fr) 2fr; gap: 16px; align-items: stretch; }
+.studio-top { display: grid; grid-template-columns: minmax(230px, 1fr) 3fr; gap: 16px; align-items: stretch; }
+.fontrow { display: flex; gap: 6px; align-items: center; }
+.fontrow select { flex: 1; min-width: 0; }
+.fontrow .ghostbtn, .fontrow button { align-self: auto; flex: none; }
 .studio-top .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .studio-top .side .field { gap: 4px; }
 .studio-top .side textarea { width: 100%; }
