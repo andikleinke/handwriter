@@ -475,7 +475,7 @@ button.tall { align-self: flex-end; }
 .playback { margin-top: 10px; }
 
 .bench-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -2px 0 10px; }
-.bench-title { margin: 0; flex: 1; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.bench-title { margin: 0; flex: 1; white-space: nowrap; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .tabs { display: flex; align-items: center; gap: 4px; margin: -4px 0 12px; border-bottom: 1px solid var(--line); }
 .tab {
   font: inherit; font-size: 13px; font-weight: 600; color: var(--muted);
