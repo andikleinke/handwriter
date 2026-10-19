@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.36.0",
+    "tag": "v0.36.0",
+    "date": "2026-10-19",
+    "note": "v0.36.0 — Letter Studio, and a bundled hand: corrections saved from the studio ship with the page as every user's starting point"
+  },
+  {
     "version": "0.35.0",
     "tag": "v0.35.0",
     "date": "2026-10-18",
-    "note": "v0.35.0 — coverage detours only along the path: the m's sideways spikes are gone"
+    "note": "coverage detours only along the path"
   },
   {
     "version": "0.34.0",

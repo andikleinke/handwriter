@@ -36,6 +36,7 @@ export class StrokeStore {
     const { fonts, manual } = this.#load();
     this.disk = fonts;
     this.manual = manual;
+    this.bundled = {}; // hands shipped with the page, per font key: under the hand's own edits, above the heuristics
     if (persist && typeof window !== 'undefined') {
       window.addEventListener('pagehide', () => this.#writeNow());
     }
@@ -78,8 +79,9 @@ export class StrokeStore {
   get(fontKey, gid) {
     const k = `${fontKey}#${gid}`;
     if (this.mem.has(k)) { this.hits++; return this.mem.get(k); }
-    // a hand-edited glyph wins over anything the heuristics left behind
-    const rec = this.manual[fontKey]?.[gid] ?? this.disk[fontKey]?.[gid];
+    // a hand-edited glyph wins over the bundled hand, which wins over
+    // anything the heuristics left behind
+    const rec = this.manual[fontKey]?.[gid] ?? this.bundled[fontKey]?.[gid] ?? this.disk[fontKey]?.[gid];
     if (rec) { this.hits++; this.mem.set(k, rec); return rec; }
     this.misses++;
     return null;
@@ -105,6 +107,21 @@ export class StrokeStore {
   /** Is this glyph hand-edited? */
   isManual(fontKey, gid) {
     return !!this.manual[fontKey]?.[gid];
+  }
+
+  /** Does the bundled hand correct this glyph? */
+  isBundled(fontKey, gid) {
+    return !!this.bundled[fontKey]?.[gid];
+  }
+
+  /**
+   * The hand shipped with the page for a font: corrections every user gets
+   * without loading anything. Not persisted - it comes with the page - and
+   * a glyph the user edits themselves still wins over it.
+   */
+  setBundled(fontKey, records) {
+    this.bundled[fontKey] = { ...records };
+    for (const gid of Object.keys(records)) this.mem.delete(`${fontKey}#${gid}`);
   }
 
   /** Every hand-edited glyph of a font, as {gid: record}. */

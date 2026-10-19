@@ -1095,6 +1095,34 @@ because records are keyed by glyph id a fix applies everywhere that glyph
 appears — correct the `l_l` ligature once and every "ll" uses it. Reordering
 is per glyph; glyphs themselves always write in shaping order.
 
+## Letter Studio and the bundled hand (v0.36.0)
+
+**Letter Studio** (the button that used to say A–Z letters) shows one
+letter at a time for correcting, with the strip of the alphabet and the
+verdict of the invariant check under each. A letter's record is keyed by
+glyph, so a correction made there applies wherever that glyph appears.
+Typing in the Text field or pressing Analyze leaves the single-letter view
+without closing the studio.
+
+**The bundled hand.** A hand saved from the studio (*Save hand*) can be
+shipped with the page: `public/hands/<face>.hand.json`, named in the
+bundled font's entry in `main.js`. When that face loads, its letters
+become every user's starting point for it, under their own edits: the
+store answers a hand-edited glyph first, then the bundled hand, then the
+heuristics (`StrokeStore.setBundled`). The strip underlines letters the
+bundled hand corrects; **↺ re-run this glyph** drops the user's own edit
+and falls back to the bundled one, not past it. A hand is matched by the
+face's family name and units per em and ignored on any other face, and it
+is never written to the user's storage, so a new file shipped with the
+page simply replaces it. Autography ships with Andreas' corrections of
+J, K, R, d, e, k, n, s and t (October 2026). To add or update: save the
+hand in the studio and replace the file.
+
+Shaping can substitute an alternate glyph for a letter in context (a
+font's `calt` feature), and an alternate has its own glyph id, so a
+correction made on the plain letter does not reach it; the studio edits
+the glyph the letter shapes to on its own.
+
 ## Recording
 
 **● Record** (next to Play) analyses the text field first if it changed,
@@ -1166,7 +1194,7 @@ What changed as a result:
 ### Correcting a hand, letter by letter (v0.15.0)
 
 A pen path belongs to a glyph, not to a word: correcting the `z` once corrects
-it in every word that uses it. **A–Z letters**, in the debug view's header,
+it in every word that uses it. **Letter Studio**, in the debug view's header,
 opens a strip of the alphabet for exactly that. Click a letter and the view
 shows it alone and large with its pen order and all the editing controls;
 close the strip and the text comes back, untouched.

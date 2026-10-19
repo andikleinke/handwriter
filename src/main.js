@@ -193,6 +193,37 @@ async function useFont(arrayBuffer, name) {
   ].join(' · ');
 }
 
+/**
+ * The hand shipped with a bundled face (public/hands/*.hand.json, a file the
+ * Letter Studio saves): its letters become every user's starting point for
+ * that face, under their own edits. Saved under a face's family name, it is
+ * ignored on any other.
+ */
+async function loadBundledHand(path) {
+  if (!fontCtx) return;
+  const key = fontKeyOf(fontCtx);
+  if (!path) { store.setBundled(key, {}); return; }
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}${path}`);
+    if (!res.ok) throw new Error(`${res.status}`);
+    const hand = await res.json();
+    const family = fontCtx.familyName || fontCtx.sourceName;
+    if (hand.format !== 'handwriter-hand' || hand.font?.family !== family || hand.font?.unitsPerEm !== fontCtx.unitsPerEm) {
+      store.setBundled(key, {});
+      return;
+    }
+    const records = {};
+    for (const [ch, record] of Object.entries(hand.letters || {})) {
+      const gid = fontCtx.ot?.charToGlyphIndex(ch) ?? 0;
+      if (gid && record?.strokes?.length) records[gid] = { ...record, gid, source: 'bundled' };
+    }
+    store.setBundled(key, records);
+  } catch (err) {
+    console.warn('bundled hand not loaded', err);
+    store.setBundled(key, {});
+  }
+}
+
 /* ---------------------------------------------------------- font picker -- */
 
 // Fonts shipped with the page. Pinyon Script (SIL OFL) is the default: a
@@ -200,7 +231,7 @@ async function useFont(arrayBuffer, name) {
 // ending at the same height and overlapping the next letter's entry.
 const BUNDLED = {
   pinyon: { url: pinyonUrl, file: 'PinyonScript-Regular.ttf', label: 'Pinyon Script (default)' },
-  autography: { url: autographyUrl, file: 'FONTFILE.otf', label: 'Autography' },
+  autography: { url: autographyUrl, file: 'FONTFILE.otf', label: 'Autography', hand: 'hands/autography.hand.json' },
   msmadi: { url: msmadiUrl, file: 'MsMadi-Regular.ttf', label: 'Ms Madi' },
 };
 const DEFAULT_FONT = 'pinyon';
@@ -237,6 +268,7 @@ async function pickFont(id) {
     }
     fontStore.choice = id;
     el.fontremove.hidden = !!BUNDLED[id];
+    await loadBundledHand(BUNDLED[id]?.hand);
     await run();
   } catch (err) {
     console.error(err);
@@ -324,14 +356,16 @@ function paintLetterStrip() {
       const gid = fontCtx.ot?.charToGlyphIndex(ch) ?? 0;
       if (!gid) return '';
       const edited = store.isManual(key, gid);
+      const bundled = !edited && store.isBundled(key, gid);
       const v = letterVerdicts.get(`${key}|${ch}`);
       const cls = ['lchip'];
       if (ch === letterMode) cls.push('sel');
       if (edited) cls.push('edited');
+      if (bundled) cls.push('bundled');
       if (!v) cls.push('pending');
       else if (v.failures.length) cls.push('bad');
       const title = [
-        edited ? 'hand-edited' : 'as recovered',
+        edited ? 'hand-edited' : bundled ? 'corrected in the bundled hand' : 'as recovered',
         v ? `${v.strokes} stroke${v.strokes === 1 ? '' : 's'}` : 'not checked yet',
         ...(v?.failures ?? []),
       ].join(' · ');
@@ -480,7 +514,7 @@ el.handfile.addEventListener('change', async (e) => {
 /** Show one letter on its own for editing, or `null` to go back to the text. */
 function setLetterMode(ch) {
   letterMode = ch;
-  el.text.title = ch ? 'showing a single letter; type here or press Analyze to write text again' : '';
+  el.text.title = ch ? 'showing a single letter (Letter Studio); type here or press Analyze to write text again' : '';
   paintLetterStrip();
   run();
 }
