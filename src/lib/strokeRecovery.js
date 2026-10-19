@@ -8,7 +8,7 @@
  * deliberately not part of the record.
  */
 
-import { rasterizeGlyph, rasterToFont, fontToRaster, mapPolylineToRaster } from './raster.js';
+import { rasterizeGlyph, rasterToFont, fontToRaster, mapPolylineToRaster, makeCanvas } from './raster.js';
 import {
   zhangSuenThin,
   distanceTransform,
@@ -414,9 +414,7 @@ function repairCoverage(strokesPx, raster, penWidthPx, emPx, distMap) {
   const { width: w, height: h, fill } = raster;
 
   // Paint the pen's coverage with the same stroker the animation uses.
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
+  const c = makeCanvas(w, h);
   const cx = c.getContext('2d', { willReadFrequently: true });
   cx.strokeStyle = cx.fillStyle = '#000';
   cx.lineWidth = penWidthPx;

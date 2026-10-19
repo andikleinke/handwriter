@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.43.0",
+    "tag": "v0.43.0",
+    "date": "2026-10-19",
+    "note": "v0.43.0 — the alphabet check recovers letters in a worker, and the stroke chips and editor sit beside the pen-paths view"
+  },
+  {
     "version": "0.42.0",
     "tag": "v0.42.0",
     "date": "2026-10-19",

@@ -14,5 +14,7 @@ export default defineConfig(({ command }) => ({
   // unpre-bundled lets Vite emit the wasm as a real asset.
   optimizeDeps: { exclude: ['harfbuzzjs'] },
   build: { target: 'esnext', assetsInlineLimit: 0 },
+  // the alphabet check's worker is a module (harfbuzzjs has a top-level await)
+  worker: { format: 'es' },
   assetsInclude: ['**/*.otf', '**/*.ttf'],
 }));

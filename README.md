@@ -1289,6 +1289,35 @@ needs the font and HarfBuzz loaded there and the raster drawn on an
 `OffscreenCanvas`, and is the next step if the stalls still get in the
 way.
 
+## The alphabet check in a worker, and the editor beside the view (v0.43.0)
+
+**The worker.** The alphabet check's recoveries now run in a Web Worker
+(`src/workers/survey.worker.js`), so the page stays responsive while a
+swash capital takes its seconds. The worker loads its own copy of the font
+(HarfBuzz and opentype.js both run there), keeps its own stroke store for
+the session, and draws the raster on an `OffscreenCanvas`
+(`raster.js makeCanvas`, also used by the coverage repair in the
+recovery). The page sends the font file once per face and then one letter
+at a time, with the record it holds for that glyph, hand-edited, bundled
+or heuristic; a glyph the worker recovers comes back with its verdict and
+goes into the page's store, so the page never recovers it again. The
+check no longer waits for idle time or stands still while a letter is
+open: the worker runs it through regardless. A browser without module
+workers or `OffscreenCanvas` falls back to the page checking the letters
+itself in idle time, as in v0.42.0.
+
+One thing bit on the way: HarfBuzz loads its wasm under a top-level
+await, and a message arriving while a worker's static imports are still
+being evaluated finds no handler and is dropped. The page's font message
+went that way and the check never started. The worker installs its
+message handler first and imports its libraries behind it.
+
+**The editor beside the view.** On the Pen paths and Letter Studio tabs
+the stroke chips, the drawing tools and the editing controls sit in a
+side column to the left of the view, a third of the width, like the
+controls beside the preview; the view is taller for it. Under 760 px the
+column stacks above the view again.
+
 ## Recording
 
 **● Record** (next to Play) analyses the text field first if it changed,

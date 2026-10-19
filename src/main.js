@@ -180,8 +180,12 @@ animator.onProgress = (f, playing) => {
 // Meulenbroek 1993), so the default average speed follows the font's x-height.
 const X_HEIGHTS_PER_SECOND = 11;
 
+let fontBytes = null;   // the font file, for the alphabet check's worker
 async function useFont(arrayBuffer, name) {
   fontCtx = await loadFont(arrayBuffer, name);
+  fontBytes = arrayBuffer;
+  fontCtx.surveyFont = `f${++surveyFontSeq}`;
+  fontCtx.sourceLabel = name;
   const xh = fontCtx.xHeight / fontCtx.unitsPerEm;
   const defaultSpeed = Math.min(4, Math.max(0.3, Math.round(X_HEIGHTS_PER_SECOND * xh * 10) / 10));
   el.speed.value = String(defaultSpeed);
@@ -494,6 +498,81 @@ function paintSurveyProgress(done, total) {
   bar.firstChild.style.width = `${pct}%`;
 }
 
+/*
+ * The check runs in a worker (src/workers/survey.worker.js): a letter's
+ * recovery is seconds of work on a swash capital, and the page stays
+ * responsive while the worker does it. The worker gets the font file once
+ * per font, then one letter at a time with the page's record for that
+ * glyph; a glyph it recovers comes back and goes into the page's store.
+ * Without a worker (an old browser, a failed load) the page checks the
+ * letters itself in idle time, as before.
+ */
+let surveyFontSeq = 0;
+let surveyWorker = null, surveyWorkerBroken = false, surveyReq = 0;
+const surveyWaiting = new Map(); // request id -> {resolve, reject}
+const surveyFontsSent = new Map(); // font id -> Promise<boolean>
+function getSurveyWorker() {
+  if (surveyWorker || surveyWorkerBroken) return surveyWorker;
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') { surveyWorkerBroken = true; return null; }
+  try {
+    surveyWorker = new Worker(new URL('./workers/survey.worker.js', import.meta.url), { type: 'module' });
+  } catch (err) {
+    console.error(err);
+    surveyWorkerBroken = true;
+    return null;
+  }
+  surveyWorker.onmessage = (e) => {
+    const m = e.data;
+    const w = surveyWaiting.get(m.id);
+    if (!w) return;
+    surveyWaiting.delete(m.id);
+    if (m.type === 'error') w.reject(new Error(m.message)); else w.resolve(m);
+  };
+  surveyWorker.onerror = (e) => {
+    console.error('alphabet check worker failed', e.message || e);
+    surveyWorkerBroken = true;
+    for (const w of surveyWaiting.values()) w.reject(new Error('worker failed'));
+    surveyWaiting.clear();
+    surveyFontsSent.clear();
+    surveyWorker.terminate();
+    surveyWorker = null;
+  };
+  return surveyWorker;
+}
+function askSurveyWorker(msg, transfer = []) {
+  const wk = getSurveyWorker();
+  if (!wk) return Promise.reject(new Error('no worker'));
+  const id = ++surveyReq;
+  return new Promise((resolve, reject) => {
+    surveyWaiting.set(id, { resolve, reject });
+    wk.postMessage({ ...msg, id }, transfer);
+  });
+}
+/** The current font loaded in the worker; false when the worker cannot be used. */
+function ensureSurveyFont() {
+  const fc = fontCtx;
+  if (!fc || !fontBytes || !getSurveyWorker()) return Promise.resolve(false);
+  let p = surveyFontsSent.get(fc.surveyFont);
+  if (!p) {
+    const bytes = fontBytes.slice(0);
+    p = askSurveyWorker({ type: 'font', font: fc.surveyFont, bytes, name: fc.sourceLabel }, [bytes])
+      .then(() => true)
+      .catch((err) => { console.error(err); surveyFontsSent.delete(fc.surveyFont); return false; });
+    surveyFontsSent.set(fc.surveyFont, p);
+    // fonts the page has moved on from are dropped in the worker
+    for (const [font] of surveyFontsSent) if (font !== fc.surveyFont) { surveyFontsSent.delete(font); surveyWorker?.postMessage({ type: 'forget', font }); }
+  }
+  return p;
+}
+/** One letter's verdict from the worker; a glyph recovered there is kept here too. */
+async function checkLetterInWorker(key, ch, rasterEm) {
+  const gid = fontCtx.ot?.charToGlyphIndex(ch) ?? 0;
+  const record = gid ? store.get(key, gid) : null;
+  const m = await askSurveyWorker({ type: 'check', font: fontCtx.surveyFont, ch, gid, record, rasterEm });
+  if (m.fresh && fontCtx && fontKeyOf(fontCtx) === key && !store.get(key, m.fresh.gid)) store.set(key, m.fresh.gid, m.fresh.record);
+  return { failures: m.failures, strokes: m.strokes };
+}
+
 /** Check every letter in the background, newest verdict first onto the strip. */
 async function surveyLetters() {
   const gen = ++surveyGeneration;
@@ -509,18 +588,28 @@ async function surveyLetters() {
   }
   const todo = [...LETTERS].filter((ch) => !letterVerdicts.has(`${key}|${ch}`));
   if (todo.length) paintSurveyProgress(LETTERS.length - todo.length, LETTERS.length);
+  const inWorker = todo.length ? await ensureSurveyFont() : false;
+  if (gen !== surveyGeneration || !fontCtx) return;
   for (const ch of LETTERS) {
     if (gen !== surveyGeneration || !fontCtx) return;
     const k = `${key}|${ch}`;
     if (!letterVerdicts.has(k)) {
-      // the recovery is synchronous: wait for idle time and a quiet user
-      if (!(await surveyPause(gen)) || !fontCtx) return;
       try {
-        const a = analyzeWord(fontCtx, ch, store, opts);
-        const chk = checkAnalysis(a);
-        rememberVerdict(key, ch, opts.rasterEm, { failures: chk.failures, strokes: chk.glyphs[0]?.strokes ?? 0 });
+        let v;
+        if (inWorker) {
+          v = await checkLetterInWorker(key, ch, opts.rasterEm);
+          if (gen !== surveyGeneration || !fontCtx) return;
+        } else {
+          // the recovery is synchronous here: wait for idle time and a quiet user
+          if (!(await surveyPause(gen)) || !fontCtx) return;
+          const a = analyzeWord(fontCtx, ch, store, opts);
+          const chk = checkAnalysis(a);
+          v = { failures: chk.failures, strokes: chk.glyphs[0]?.strokes ?? 0 };
+        }
+        rememberVerdict(key, ch, opts.rasterEm, v);
       } catch (err) {
         console.error(err);
+        if (gen !== surveyGeneration) return;
         letterVerdicts.set(k, { failures: [], strokes: 0 });
       }
       paintChip(ch, key);

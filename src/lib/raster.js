@@ -11,6 +11,21 @@
  */
 
 const PAD = 6;
+
+/**
+ * A scratch canvas: the page's kind, or an OffscreenCanvas where there is
+ * no document (the alphabet check's worker). Both give a 2D context that
+ * fills Path2D paths and reads pixels back.
+ */
+export function makeCanvas(width, height) {
+  if (typeof document !== 'undefined') {
+    const c = document.createElement('canvas');
+    c.width = width;
+    c.height = height;
+    return c;
+  }
+  return new OffscreenCanvas(width, height);
+}
 const HAIRLINE_PX = 1.1;
 const ALPHA_THRESHOLD = 100;
 
@@ -34,9 +49,7 @@ export function rasterizeGlyph(pathData, bbox, opts) {
   const width = Math.ceil(bw * scale) + 2 * PAD;
   const height = Math.ceil(bh * scale) + 2 * PAD;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  const canvas = makeCanvas(width, height);
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
   // font -> raster:  px = (fx - bbox.x1) * scale + PAD
