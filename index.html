@@ -48,9 +48,10 @@
             <label class="check"><input type="checkbox" id="loop" checked /> loop</label>
           </div>
           <div class="row wrap small moviectl">
-            <select id="movieformat" title="the movie keeps a transparent background in either format">
-              <option value="prores4444">ProRes 4444</option>
-              <option value="hevc-alpha">HEVC + alpha</option>
+            <select id="movieformat" title="every format keeps a transparent background; 'in browser' needs no server (the encoder downloads once, about 30 MB), the other two need the local dev server on a Mac">
+              <option value="prores4444-wasm">ProRes 4444 (in browser)</option>
+              <option value="prores4444">ProRes 4444 (dev server)</option>
+              <option value="hevc-alpha">HEVC + alpha (dev server)</option>
             </select>
             <button id="exportmovie" class="ghost"
               title="renders the animation frame by frame (60 fps, 1920 px wide, transparent background) and saves a .mov with an alpha channel; the pen tip follows its checkbox">Export movie</button>
@@ -105,7 +106,8 @@
           <div id="strokelist" class="strokelist"></div>
           <div class="editor">
             <div id="drawtools">
-              <button id="drawMode" class="ghost" title="draw a new pen path over the letter; it becomes a stroke of that glyph">✎ draw stroke</button>
+              <button id="drawMode" class="ghost" title="draw a new pen path over the letter freehand; it becomes a stroke of that glyph">✎ draw stroke</button>
+              <button id="placeMode" class="ghost" title="place a new pen path point by point: click the key points along it in order, a smooth curve runs through them; Enter or double-click finishes, Backspace removes the last point, Esc cancels">⌖ place points</button>
               <button id="curveMode" class="ghost" title="edit the selected stroke by Bézier anchors and handles instead of its points">⌒ curve handles</button>
               <label class="check" title="pull hand-placed points onto the ink's centreline"
                 ><input type="checkbox" id="snapInk" checked /> snap to ink</label

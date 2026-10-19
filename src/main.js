@@ -12,6 +12,7 @@ import { loadFont } from './lib/shaping.js';
 import { fontStore } from './lib/fontStore.js';
 import { analyzeWord, toJSON, rebuildPlan, refreshGlyphRecord } from './lib/analyze.js';
 import { derivePath } from './lib/penPlan.js';
+import { smoothThroughPoints } from './lib/geometry.js';
 import { checkAnalysis } from './lib/fontCheck.js';
 import {
   splitStroke,
@@ -75,6 +76,7 @@ const el = {
   resetGlyph: $('resetGlyph'),
   deselect: $('deselect'),
   drawMode: $('drawMode'),
+  placeMode: $('placeMode'),
   curveMode: $('curveMode'),
   snapInk: $('snapInk'),
   anim: $('anim'),
@@ -151,6 +153,8 @@ let scrubbing = false;
 let selection = null; // {glyphIndex, strokeIndex, pointIndex?} of the stroke being edited
 let debugLayout = null;
 let drawModeOn = false;
+let placeModeOn = false; // a new path from clicked key points, a smooth curve through them
+let placing = null;      // {pts: [[cssX, cssY], ...]} while points are being placed
 const view = { zoom: 1, panX: 0, panY: 0 }; // debug view only; the animation stays fitted
 let pan = null;         // {last} while the view is being dragged
 let drawing = null;     // {pts: [[cssX, cssY], ...]} while a path is being drawn
@@ -844,6 +848,8 @@ function restoreRecord(gid, json) {
   for (const g of analysis.glyphs) if (g.gid === gid) g.record = rec;
   refreshGlyphRecord(analysis, gid, rec);
   selectedPoint = null;
+  // the selected stroke may be one this restore removed (undoing a drawn or placed path)
+  if (selection && analysis.glyphs[selection.glyphIndex]?.gid === gid && selection.strokeIndex >= rec.strokes.length) selection = null;
   replan();
   updateHistoryButtons();
   const g = analysis.glyphs.find((x) => x.gid === gid);
@@ -953,13 +959,84 @@ el.loop.addEventListener('change', () => {
 /* --------------------------------------------- drawing and dragging paths -- */
 
 function setDrawMode(on) {
+  if (on && placeModeOn) setPlaceMode(false);
   drawModeOn = on;
   el.drawMode.classList.toggle('active', on);
-  el.debug.classList.toggle('drawing', on);
+  el.debug.classList.toggle('drawing', on || placeModeOn);
   el.drawMode.textContent = on ? '✎ drawing… (Esc to stop)' : '✎ draw stroke';
 }
 
 el.drawMode.addEventListener('click', () => setDrawMode(!drawModeOn));
+
+/* ------------------------------------------------ a path from key points -- */
+
+// Freehand drawing is only as steady as the hand; placing the key points
+// of a path one click at a time is exact, and the curve between them is
+// the same spline the chains run along (geometry.js smoothThroughPoints).
+function setPlaceMode(on) {
+  if (on && drawModeOn) setDrawMode(false);
+  placeModeOn = on;
+  placing = on ? { pts: [] } : null;
+  el.placeMode.classList.toggle('active', on);
+  el.debug.classList.toggle('drawing', on || drawModeOn);
+  el.placeMode.textContent = on ? '⌖ placing… (Enter finishes, Esc stops)' : '⌖ place points';
+  if (analysis) paintDebug();
+}
+
+el.placeMode.addEventListener('click', () => setPlaceMode(!placeModeOn));
+
+/** The dense CSS-space curve through the placed points. */
+function placedCurve(step = 2) {
+  const pts = placing?.pts || [];
+  if (pts.length < 2) return pts.map((p) => [p[0], p[1]]);
+  return smoothThroughPoints(pts, step, 60);
+}
+
+function previewPlacing() {
+  paintDebug();
+  if (!placing?.pts.length) return;
+  const ctx = el.debug.getContext('2d');
+  const curve = placedCurve();
+  ctx.save();
+  if (curve.length > 1) {
+    ctx.strokeStyle = '#e0562d';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(curve[0][0], curve[0][1]);
+    for (let i = 1; i < curve.length; i++) ctx.lineTo(curve[i][0], curve[i][1]);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#e0562d';
+  ctx.lineWidth = 2;
+  for (const p of placing.pts) {
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function finishPlacing() {
+  if (!placing) return;
+  const curve = placedCurve(2);
+  const n = placing.pts.length;
+  placing = { pts: [] };
+  if (n < 2) { setPlaceMode(false); return; }
+  setPlaceMode(false);
+  finishDrawing(curve); // the same road a drawn path takes: snap, attribute, insert, commit
+}
+
+el.debug.addEventListener('dblclick', (e) => {
+  if (!placeModeOn) return;
+  e.preventDefault();
+  finishPlacing();
+});
 
 /* ------------------------------------------------------- curve handles -- */
 
@@ -1016,6 +1093,7 @@ function pointNearAnchor(sel, anchor) {
 window.__curve = { strokeCurve, moveCurveHandle, get mode() { return curveModeOn; }, set mode(v) { setCurveMode(!!v); } };
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && drawModeOn) setDrawMode(false);
+  if (e.key === 'Escape' && placeModeOn) setPlaceMode(false);
 });
 
 /** Index of the selected stroke's vertex within maxDist CSS px of `at`, or null. */
@@ -1100,6 +1178,7 @@ el.debug.addEventListener('pointerdown', (e) => {
   const at = canvasPoint(e);
   if (drawModeOn) { drawing = { pts: [at] }; return; }
   pointerDown = { at, moved: false };
+  if (placeModeOn) return; // a click places a point on pointerup; nothing is dragged
   if (selection && curveModeOn) {
     const g = analysis.glyphs[selection.glyphIndex];
     const anchors = strokeCurve(g.record, selection.strokeIndex);
@@ -1187,6 +1266,14 @@ el.debug.addEventListener('pointerup', (e) => {
   }
   drag = null;
   pan = null;
+  if (placeModeOn && pointerDown && !pointerDown.moved) {
+    const at = canvasPoint(e);
+    const last = placing.pts[placing.pts.length - 1];
+    if (!last || Math.hypot(at[0] - last[0], at[1] - last[1]) > 2) placing.pts.push(at);
+    previewPlacing();
+    pointerDown = null;
+    return;
+  }
   if (pointerDown && !pointerDown.moved) {
     const [x, y] = canvasPoint(e);
     const onPoint = selection && !curveModeOn ? nearestVertex(selection, [x, y], 9) : null;
@@ -1237,6 +1324,10 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redoEdit(); return; }
+  if (placeModeOn) {
+    if (e.key === 'Enter') { e.preventDefault(); finishPlacing(); return; }
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); placing.pts.pop(); previewPlacing(); return; }
+  }
   if ((e.key === 'Backspace' || e.key === 'Delete') && selection && selectedPoint != null) {
     e.preventDefault();
     removeSelectedPoint();
@@ -1439,7 +1530,8 @@ el.copyjson.addEventListener('click', async () => {
 const MOVIE = { width: 1920, fps: 60, hold: 1 };
 let exportingMovie = false;
 
-el.movieformat.value = (() => { try { return localStorage.getItem('handwriter.movieformat') || 'prores4444'; } catch { return 'prores4444'; } })();
+const onDevServer = ['localhost', '127.0.0.1'].includes(location.hostname);
+el.movieformat.value = (() => { try { return localStorage.getItem('handwriter.movieformat') || (onDevServer ? 'prores4444' : 'prores4444-wasm'); } catch { return 'prores4444-wasm'; } })();
 el.movieformat.addEventListener('change', () => {
   try { localStorage.setItem('handwriter.movieformat', el.movieformat.value); } catch { /* private mode */ }
 });
@@ -1459,6 +1551,18 @@ el.exportmovie.addEventListener('click', async () => {
   const codec = el.movieformat.value;
   const text = (analysis?.text || 'word').replace(/\W+/g, '_');
   try {
+    if (codec === 'prores4444-wasm') {
+      // in the browser: FFmpeg in WebAssembly writes ProRes 4444 with alpha
+      const { encodeProRes } = await import('./lib/wasmMovie.js');
+      const { blob, info } = await encodeProRes({
+        fps: MOVIE.fps,
+        render: (onFrame) => animator.renderFrames({ width: MOVIE.width, fps: MOVIE.fps, hold: MOVIE.hold, showPen: el.showpen.checked }, onFrame),
+        onStatus: (status) => { el.exportmovie.textContent = status; },
+      });
+      downloadBlob(blob, `handwriting-${text}.mov`);
+      el.takeinfo.textContent = `movie: ${info.width}×${info.height}, ${info.count} frames at ${info.fps} fps, ProRes 4444 with alpha (encoded in the browser), ${(blob.size / 1e6).toFixed(1)} MB`;
+      return;
+    }
     let id;
     try {
       ({ id } = await postJSON('/__movie/start', { fps: MOVIE.fps, codec }));

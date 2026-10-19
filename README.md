@@ -204,8 +204,32 @@ paths and the editor), **Letter Studio** (the same view with the alphabet
 strip above it) and **Advanced** (everything a first look does not need:
 settings, diagnostics, the log and the stroke data). **Check in-browser
 video encoding** under Advanced asks the browser's WebCodecs whether it
-could encode HEVC or VP9 with an alpha channel itself; the movie export
-still runs through the dev server's AVFoundation encoder on a Mac.
+could encode HEVC or VP9 with an alpha channel itself (Safari and Chrome
+both say no: the alpha is dropped).
+
+### Export movie, in the browser (v0.39.0)
+
+**ProRes 4444 (in browser)**, the default on the hosted page, encodes the
+movie without any server: the frames go through FFmpeg compiled to
+WebAssembly (`src/lib/wasmMovie.js`; the 30 MB encoder is fetched once from
+a CDN and cached), whose ProRes encoder writes a real alpha plane. The file
+is a QuickTime `.mov` with the `ap4h` codec and 16-bit alpha, which Keynote,
+Final Cut and Motion import as is. Encoding is quick (the ProRes encoder is
+intra-frame): 80 frames at 640 px took one second in testing, and 1920 px
+runs at a few seconds per hundred frames. The two **dev server** formats
+remain for work on a Mac with `npm run dev`: ProRes 4444 and HEVC + alpha
+through AVFoundation.
+
+### Placing a path point by point (v0.39.0)
+
+**⌖ place points** in the editor is the exact way to add a pen path: click
+the key points along the intended path in order, and a smooth curve runs
+through them (the same spline the chains run along, with corners kept
+above 60°); Enter or a double-click finishes it, Backspace removes the
+last point, Esc cancels. The finished curve takes the same road as a
+drawn path: snapped to the ink's centreline when *snap to ink* is on,
+attributed to the glyph it lies over, inserted after the selected stroke,
+committed as a hand edit. Freehand **✎ draw stroke** stays for sketching.
 
 ## Pipeline
 

@@ -1,6 +1,6 @@
 {
   "name": "handwriter-stroke-recovery",
-  "version": "0.38.1",
+  "version": "0.39.0",
   "description": "Prototype: recovering pen strokes and centrelines from a static cursive font",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,8 @@
     "vite": "^8.2.1"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "harfbuzzjs": "^1.6.0",
     "opentype.js": "^2.0.0"
   },
