@@ -52,7 +52,6 @@ const el = {
   connect: $('connect'),
   natural: $('natural'),
   clearcache: $('clearcache'),
-  lettermode: $('lettermode'),
   letterpanel: $('letterpanel'),
   letterstrip: $('letterstrip'),
   letterinfo: $('letterinfo'),
@@ -278,6 +277,7 @@ async function pickFont(id) {
     el.fontremove.hidden = !!BUNDLED[id];
     await loadBundledHand(BUNDLED[id]?.hand);
     await run();
+    refreshStudio();
   } catch (err) {
     console.error(err);
     el.fontinfo.innerHTML = `<span class="err">Could not load the font: ${escapeHtml(String(err))}</span>`;
@@ -303,6 +303,7 @@ el.fontfile.addEventListener('change', async (e) => {
     fontStore.choice = id;
     el.fontremove.hidden = false;
     await run();
+    refreshStudio();
   } catch (err) {
     console.error(err);
     el.fontinfo.innerHTML = `<span class="err">${escapeHtml(String(err))}</span>`;
@@ -728,44 +729,15 @@ function leaveLetterMode() {
 
 /* ------------------------------------------------------- the workbench -- */
 
-// Three tabs over one card: the pen paths of the text, the same view with
-// the alphabet strip above it (Letter Studio), and the settings and
-// diagnostics (Advanced). The debug canvas is shared by the first two.
-const tabPaths = $('tabPaths'), tabAdvanced = $('tabAdvanced'), panePaths = $('paths'), paneAdvanced = $('advanced');
-function showTab(which) {
-  const studio = which === 'studio';
-  panePaths.hidden = which === 'advanced';
-  paneAdvanced.hidden = which !== 'advanced';
-  tabPaths.classList.toggle('on', which === 'paths');
-  el.lettermode.classList.toggle('on', studio);
-  tabAdvanced.classList.toggle('on', which === 'advanced');
-  document.getElementById('viewtools').hidden = which === 'advanced';
-  if (which !== 'advanced' && analysis) paintDebug();
+// One workbench: the alphabet strip over the pen paths of the text, or of
+// the one letter picked in the strip. Settings and diagnostics are under
+// Advanced at the foot of the page, closed by default.
+/** Paint the strip for the current font and start checking its letters. */
+function refreshStudio() {
+  if (!fontCtx) return;
+  paintLetterStrip();
+  surveyLetters();
 }
-tabPaths.addEventListener('click', () => {
-  if (!el.letterpanel.hidden) el.lettermode.click(); // closes the studio, which shows the paths
-  else showTab('paths');
-});
-tabAdvanced.addEventListener('click', () => {
-  if (!el.letterpanel.hidden) { el.letterpanel.hidden = true; surveyGeneration++; if (letterMode) setLetterMode(null); }
-  showTab('advanced');
-});
-
-el.lettermode.addEventListener('click', () => {
-  const opening = el.letterpanel.hidden;
-  el.letterpanel.hidden = !opening;
-  showTab(opening ? 'studio' : 'paths');
-  if (opening) {
-    paintLetterStrip();
-    surveyLetters();
-  } else {
-    surveyGeneration++;
-    letterNote = '';
-    letterNoteError = false;
-    el.letterinfo.textContent = '';
-    if (letterMode) setLetterMode(null);
-  }
-});
 
 el.letterstrip.addEventListener('click', (e) => {
   const ch = e.target.closest('button')?.dataset.ch;
@@ -1157,7 +1129,7 @@ function setDrawMode(on) {
   drawModeOn = on;
   el.drawMode.classList.toggle('active', on);
   el.debug.classList.toggle('drawing', on || placeModeOn);
-  el.drawMode.textContent = on ? '✎ drawing… (Esc to stop)' : '✎ draw stroke';
+  el.drawMode.textContent = on ? '✎ Drawing… (Esc stops)' : '✎ Draw stroke';
 }
 
 el.drawMode.addEventListener('click', () => setDrawMode(!drawModeOn));
@@ -1173,7 +1145,7 @@ function setPlaceMode(on) {
   placing = on ? { pts: [] } : null;
   el.placeMode.classList.toggle('active', on);
   el.debug.classList.toggle('drawing', on || drawModeOn);
-  el.placeMode.textContent = on ? '⌖ placing… (Enter finishes, Esc stops)' : '⌖ place points';
+  el.placeMode.textContent = on ? '⌖ Placing… (Enter ends, Esc stops)' : '⌖ Place points';
   if (analysis) paintDebug();
 }
 

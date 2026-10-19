@@ -72,11 +72,8 @@
       </section>
 
       <section class="panel workbench">
-        <div class="tabs" role="tablist">
-          <button id="tabPaths" class="tab on" role="tab" title="the recovered pen paths of the text, and the editor">Pen paths</button>
-          <button id="lettermode" class="tab" role="tab" title="work through the alphabet letter by letter, correcting each letter's pen path once for every word that uses it">Letter Studio</button>
-          <button id="tabAdvanced" class="tab" role="tab" title="settings and diagnostics">Advanced</button>
-          <div class="tabspace"></div>
+        <div class="bench-head">
+          <h2 class="bench-title">Letter Studio</h2>
           <div id="viewtools" class="viewtools">
             <label class="check"><input type="checkbox" id="outlines" checked /> outlines</label>
             <label class="check"><input type="checkbox" id="arrows" checked /> arrows</label>
@@ -92,7 +89,7 @@
         </div>
 
         <div id="paths" class="tabpane">
-          <div id="letterpanel" hidden>
+          <div id="letterpanel">
             <div id="letterstrip" class="letterstrip"></div>
             <div class="handtools">
               <div id="letterinfo" class="meta"></div>
@@ -106,30 +103,31 @@
           <aside class="side editor-side">
           <div id="strokelist" class="strokelist"></div>
           <div class="editor">
-            <div id="drawtools">
-              <button id="drawMode" class="ghost" title="draw a new pen path over the letter freehand; it becomes a stroke of that glyph">✎ draw stroke</button>
-              <button id="placeMode" class="ghost" title="place a new pen path point by point: click the key points along it in order, a smooth curve runs through them; Enter or double-click finishes, Backspace removes the last point, Esc cancels">⌖ place points</button>
-              <button id="curveMode" class="ghost" title="edit the selected stroke by Bézier anchors and handles instead of its points">⌒ curve handles</button>
-              <label class="check" title="pull hand-placed points onto the ink's centreline"
-                ><input type="checkbox" id="snapInk" checked /> snap to ink</label
-              >
-              <span id="edithint" class="meta hint"
-                title="Click a stroke to edit it, then click one of its points to pick it. Drag a point to reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point; [ and ] make its width thinner or wider (⇧ by a fifth), \ gives it the ink's width back. With ⌒ curve handles on, the stroke shows Bézier anchors (squares) and handles (knobs): drag an anchor and its handles come along, drag a handle and its partner stays in line (hold ⌥ to break it). ⌘Z / ⌘⇧Z undo and redo."
-                >click a stroke, then a point · drag to reshape (⇧ one point) · ⌫ delete · [ ] width · \ reset · ⌘Z undo · hover for more</span
+            <div id="drawtools" class="toolgrid">
+              <button id="drawMode" class="ghost" title="draw a new pen path over the letter freehand; it becomes a stroke of that glyph">✎ Draw stroke</button>
+              <button id="placeMode" class="ghost" title="place a new pen path point by point: click the key points along it in order, a smooth curve runs through them; Enter or double-click finishes, Backspace removes the last point, Esc cancels">⌖ Place points</button>
+              <button id="curveMode" class="ghost" title="edit the selected stroke by Bézier anchors and handles instead of its points">⌒ Curve handles</button>
+              <label class="check boxed" title="pull hand-placed points onto the ink's centreline"
+                ><input type="checkbox" id="snapInk" checked /> Snap to ink</label
               >
             </div>
+            <p id="edithint" class="meta hint"
+              title="Click a stroke to edit it, then click one of its points to pick it. Drag a point to reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point; [ and ] make its width thinner or wider (⇧ by a fifth), \ gives it the ink's width back. With ⌒ Curve handles on, the stroke shows Bézier anchors (squares) and handles (knobs): drag an anchor and its handles come along, drag a handle and its partner stays in line (hold ⌥ to break it). ⌘Z / ⌘⇧Z undo and redo."
+            >Click a stroke, then a point. Drag to reshape (⇧ one point) · ⌫ delete · [ ] width · \ reset · ⌘Z undo. Hover for more.</p>
             <div id="editcontrols" hidden>
-              <span id="editlabel" class="meta"></span>
-              <button id="undoEdit" class="ghost" title="nothing to undo" disabled>↶ undo</button>
-              <button id="redoEdit" class="ghost" title="nothing to redo" disabled>↷ redo</button>
-              <button id="deletePoint" class="ghost" title="click a point on the stroke first" disabled>⌫ delete point</button>
-              <button id="moveEarlier" class="ghost">◀ earlier</button>
-              <button id="moveLater" class="ghost">later ▶</button>
-              <button id="reverseStroke" class="ghost">⇄ reverse direction</button>
-              <button id="splitStroke" class="ghost" title="click a point on the stroke in the view above to place the split">✂ split here</button>
-              <button id="deleteStroke" class="ghost" title="removes the pen pass; the ink is revealed by the nearest remaining stroke">🗑 delete stroke</button>
-              <button id="resetGlyph" class="ghost">↺ re-run this glyph</button>
-              <button id="deselect" class="ghost">✕ deselect</button>
+              <div id="editlabel" class="meta editlabel"></div>
+              <div class="toolgrid">
+                <button id="undoEdit" class="ghost" title="nothing to undo" disabled>↶ Undo</button>
+                <button id="redoEdit" class="ghost" title="nothing to redo" disabled>↷ Redo</button>
+                <button id="deletePoint" class="ghost" title="click a point on the stroke first" disabled>⌫ Delete point</button>
+                <button id="splitStroke" class="ghost" title="click a point on the stroke in the view to place the split">✂ Split here</button>
+                <button id="moveEarlier" class="ghost" title="write this stroke one place earlier in the pen's order">◀ Earlier</button>
+                <button id="moveLater" class="ghost" title="write this stroke one place later in the pen's order">Later ▶</button>
+                <button id="reverseStroke" class="ghost span2" title="the pen runs this stroke the other way">⇄ Reverse direction</button>
+                <button id="deleteStroke" class="ghost" title="removes the pen pass; the ink is revealed by the nearest remaining stroke">🗑 Delete stroke</button>
+                <button id="resetGlyph" class="ghost" title="drop every edit of this glyph and recover its paths again">↺ Re-run this glyph</button>
+                <button id="deselect" class="ghost span2">✕ Deselect</button>
+              </div>
             </div>
           </div>
           </aside>
@@ -137,7 +135,11 @@
           </div>
         </div>
 
-        <div id="advanced" class="tabpane" hidden>
+      </section>
+
+      <details id="advanced" class="panel advanced">
+        <summary>Advanced</summary>
+        <div class="advanced-body">
           <p class="sub">
             A font's own outline, written by a pen: the text is shaped, each glyph rasterised and thinned, the pen's
             order and direction read off the skeleton, and the letter drawn as the pen's ribbon along that path.
@@ -177,8 +179,8 @@
             </div>
           </div>
           <pre id="json" class="json"></pre>
-        </div>
-      </section>
+                </div>
+      </details>
     </main>
 
     <script type="module" src="/src/main.js"></script>

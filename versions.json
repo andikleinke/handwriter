@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.44.0",
+    "tag": "v0.44.0",
+    "date": "2026-10-19",
+    "note": "v0.44.0 — one workbench: Letter Studio with the strip always shown, the editor as a grid of proper buttons, Advanced as a closed disclosure at the foot of the page"
+  },
+  {
     "version": "0.43.0",
     "tag": "v0.43.0",
     "date": "2026-10-19",

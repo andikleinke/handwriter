@@ -227,6 +227,26 @@ a.takelink:hover { background: var(--accent); color: #fff; }
   align-items: center;
 }
 #editcontrols { margin-top: 8px; }
+/* the editor's buttons: two to a row, every one the same width */
+.toolgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.toolgrid > * { width: 100%; min-width: 0; box-sizing: border-box; }
+.toolgrid button { justify-content: center; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 8px; }
+.toolgrid .span2 { grid-column: span 2; }
+.check.boxed { justify-content: center; border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
+.check.boxed:hover { color: var(--ink); border-color: var(--muted); }
+.editlabel { margin: 0 0 8px; }
+.editor-side #drawtools, .editor-side #editcontrols { display: block; }
+.editor-side #drawtools { display: grid; }
+.editor-side p.hint { margin: 8px 0 0; }
+#editcontrols[hidden] { display: none; }
+/* Advanced: a closed disclosure at the foot of the page */
+details.advanced { margin-top: 16px; }
+details.advanced > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); user-select: none; }
+details.advanced > summary::-webkit-details-marker { display: none; }
+details.advanced > summary::before { content: ''; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform .15s; margin-left: 2px; }
+details.advanced[open] > summary::before { transform: rotate(45deg); }
+details.advanced > summary:hover { color: var(--ink); }
+.advanced-body { margin-top: 12px; }
 button.ghost.active { color: var(--accent); border-color: var(--accent); }
 .stage canvas.drawing { cursor: crosshair; }
 .stage canvas { touch-action: none; }
@@ -454,6 +474,8 @@ main { max-width: 1180px; }
 button.tall { align-self: flex-end; }
 .playback { margin-top: 10px; }
 
+.bench-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -2px 0 10px; }
+.bench-title { margin: 0; flex: 1; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .tabs { display: flex; align-items: center; gap: 4px; margin: -4px 0 12px; border-bottom: 1px solid var(--line); }
 .tab {
   font: inherit; font-size: 13px; font-weight: 600; color: var(--muted);

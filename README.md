@@ -1318,6 +1318,27 @@ side column to the left of the view, a third of the width, like the
 controls beside the preview; the view is taller for it. Under 760 px the
 column stacks above the view again.
 
+## One workbench (v0.44.0)
+
+The Pen paths tab is gone: it showed the pen paths of the text, which is
+what Letter Studio shows when no letter is picked in its strip, so the
+page now has one workbench, **Letter Studio**, with the alphabet strip
+always above the view. Pick a letter to work on it alone, pick it again
+(or type in the Text field) to see the text. The alphabet check starts
+when a font loads.
+
+The editor's controls beside the view are a grid of proper buttons, two
+to a row, each the same width, with capitalised labels and a tooltip
+each: *Draw stroke* and *Place points* (new paths), *Curve handles* and
+*Snap to ink* (how edits behave), and for the picked stroke *Undo* /
+*Redo*, *Delete point* / *Split here*, *Earlier* / *Later*, *Reverse
+direction*, *Delete stroke* / *Re-run this glyph*, *Deselect*.
+
+**Advanced** moved to the foot of the page, a disclosure with a chevron,
+closed by default: raster size, renderer, the raster and skeleton
+figures, the stroke cache, the font and shaping lines, the video-encoding
+probe, the uncertainty log and the stroke data.
+
 ## Recording
 
 **● Record** (next to Play) analyses the text field first if it changed,
