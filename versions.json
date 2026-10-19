@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.38.1",
+    "tag": "v0.38.1",
+    "date": "2026-10-19",
+    "note": "v0.38.1 — the text box is one line again (it still grows with Shift+Enter lines)"
+  },
+  {
     "version": "0.38.0",
     "tag": "v0.38.0",
     "date": "2026-10-19",
-    "note": "v0.38.0 — the controls in a side panel beside the preview; Record dropped; a probe for in-browser alpha video encoding"
+    "note": "side panel beside the preview"
   },
   {
     "version": "0.37.0",
