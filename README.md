@@ -186,14 +186,22 @@ Open http://localhost:5173.
    pen, on paper and in the air. **Natural speed** toggles the research-based
    velocity model against constant speed; **connect letters** toggles the
    bridging; **loop** runs the animation continuously.
-5. **Zoom the debug view** (up to 800%) with its − / + / fit buttons, or by
+5. **Zoom the pen paths** (up to 800%) with the − / + / fit buttons, or by
    scrolling over it — zoom happens at the cursor. Drag empty space to pan.
    Stroke lines, handles and badges keep their screen size, which is what
    makes zoomed editing easy. The animation preview always shows the whole
    text.
-6. Read the **uncertainty log** — ambiguous junctions, near-tied starting
-   points, deferred crossbars, reversed strokes.
-7. **Copy** / **Download** the JSON to see the cacheable data layer.
+6. Open **Advanced** for the **uncertainty log** — ambiguous junctions,
+   near-tied starting points, deferred crossbars, reversed strokes — the
+   shaping and font details, the raster size, the renderer switch and the
+   raster + skeleton figures.
+7. There too, **Copy** / **Download** the JSON to see the cacheable data layer.
+
+The page (v0.37.0) is three cards: the text and font, the animation
+preview, and a workbench with three tabs — **Pen paths** (the recovered
+paths and the editor), **Letter Studio** (the same view with the alphabet
+strip above it) and **Advanced** (everything a first look does not need:
+settings, diagnostics, the log and the stroke data).
 
 ## Pipeline
 

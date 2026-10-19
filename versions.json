@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.37.0",
+    "tag": "v0.37.0",
+    "date": "2026-10-19",
+    "note": "v0.37.0 — a compact page: three cards and a tabbed workbench, with settings and diagnostics under Advanced"
+  },
+  {
     "version": "0.36.0",
     "tag": "v0.36.0",
     "date": "2026-10-19",
-    "note": "v0.36.0 — Letter Studio, and a bundled hand: corrections saved from the studio ship with the page as every user's starting point"
+    "note": "Letter Studio and the bundled hand"
   },
   {
     "version": "0.35.0",

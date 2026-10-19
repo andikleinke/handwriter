@@ -528,10 +528,35 @@ function leaveLetterMode() {
   return true;
 }
 
+/* ------------------------------------------------------- the workbench -- */
+
+// Three tabs over one card: the pen paths of the text, the same view with
+// the alphabet strip above it (Letter Studio), and the settings and
+// diagnostics (Advanced). The debug canvas is shared by the first two.
+const tabPaths = $('tabPaths'), tabAdvanced = $('tabAdvanced'), panePaths = $('paths'), paneAdvanced = $('advanced');
+function showTab(which) {
+  const studio = which === 'studio';
+  panePaths.hidden = which === 'advanced';
+  paneAdvanced.hidden = which !== 'advanced';
+  tabPaths.classList.toggle('on', which === 'paths');
+  el.lettermode.classList.toggle('on', studio);
+  tabAdvanced.classList.toggle('on', which === 'advanced');
+  document.getElementById('viewtools').hidden = which === 'advanced';
+  if (which !== 'advanced' && analysis) paintDebug();
+}
+tabPaths.addEventListener('click', () => {
+  if (!el.letterpanel.hidden) el.lettermode.click(); // closes the studio, which shows the paths
+  else showTab('paths');
+});
+tabAdvanced.addEventListener('click', () => {
+  if (!el.letterpanel.hidden) { el.letterpanel.hidden = true; surveyGeneration++; if (letterMode) setLetterMode(null); }
+  showTab('advanced');
+});
+
 el.lettermode.addEventListener('click', () => {
   const opening = el.letterpanel.hidden;
   el.letterpanel.hidden = !opening;
-  el.lettermode.classList.toggle('on', opening);
+  showTab(opening ? 'studio' : 'paths');
   if (opening) {
     paintLetterStrip();
     surveyLetters();

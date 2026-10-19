@@ -10,11 +10,6 @@
     <header class="topbar">
       <h1>Handwriter <button id="versionbtn" class="versionbtn" type="button" title="version history">prototype</button></h1>
       <div id="versionlist" class="versionlist" hidden></div>
-      <p class="sub">
-        a font's own outline uncovered along its recovered pen path: the text is
-        shaped, each glyph rasterised and thinned, and the pen's order and direction
-        read off the skeleton.
-      </p>
     </header>
 
     <main>
@@ -24,9 +19,6 @@
             <span>Text</span>
             <textarea id="text" rows="1" autocomplete="off" spellcheck="false" title="Enter analyses; Shift+Enter starts a new line">hello</textarea>
           </label>
-          <button id="analyze" class="primary">Analyze</button>
-        </div>
-        <div class="row wrap small">
           <label class="field">
             <span>Font</span>
             <select id="fontpick" title="the bundled font, or any font you have added"></select>
@@ -35,28 +27,14 @@
             + Add font… <input id="fontfile" type="file" accept=".otf,.ttf,.woff" hidden />
           </label>
           <button id="fontremove" class="ghost" title="forget the selected font" hidden>Remove</button>
-          <label class="field">
-            <span>Raster em (px)</span>
-            <input id="rasterEm" type="number" min="128" max="1024" step="64" value="512" />
-          </label>
-          <label class="check"><input type="checkbox" id="outlines" checked /> outlines</label>
-          <label class="check"><input type="checkbox" id="arrows" checked /> arrowheads</label>
-          <label class="check"><input type="checkbox" id="numbers" checked /> numbers</label>
-          <label class="check"><input type="checkbox" id="nodes" checked /> endpoints</label>
-          <label class="check"><input type="checkbox" id="internals" /> raster + skeleton</label>
-          <label class="check" title="let the pen flow from one letter's exit straight into the next letter's entry"
+          <label class="check tall" title="let the pen flow from one letter's exit straight into the next letter's entry"
             ><input type="checkbox" id="connect" checked /> connect letters</label
           >
-          <button id="clearcache" class="ghost">Clear stroke cache</button>
+          <button id="analyze" class="primary">Analyze</button>
         </div>
-        <div id="fontinfo" class="meta">Loading font…</div>
       </section>
 
       <section class="panel">
-        <div class="panel-head">
-          <h2>Animation preview</h2>
-          <div id="animmeta" class="meta right">the font's own outlines, uncovered by a round nib that follows the recovered path</div>
-        </div>
         <div class="stage paper player">
           <canvas id="anim"></canvas>
           <div class="player-controls">
@@ -66,17 +44,10 @@
             <span id="timecode" class="tc">0.0 / 0.0 s</span>
           </div>
         </div>
-        <div class="row wrap playback">
+        <div class="row wrap playback small">
           <label class="field grow">
             <span>Avg speed <b id="speedval">2.2</b> em/s</span>
             <input id="speed" type="range" min="0.3" max="4" step="0.1" value="2.2" />
-          </label>
-          <label class="field" title="outline: the font's outline uncovered along the recovered pen path; stroke: the pen's ribbon itself is the letter, its profiles fitted to the outline">
-            <span>Renderer</span>
-            <select id="renderer">
-              <option value="stroke">stroke</option>
-              <option value="outline">outline reveal (previous engine)</option>
-            </select>
           </label>
           <label class="check"><input type="checkbox" id="showpen" checked /> pen tip</label>
           <label class="check" title="curvature-dependent speed with ease in/out, instead of constant speed"
@@ -96,78 +67,106 @@
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Debug view</h2>
-          <div class="zoomctl" title="scroll to zoom at the cursor · drag empty space to pan">
-            <button class="ghost" data-zoom="out">−</button>
-            <span class="meta zoomval">100%</span>
-            <button class="ghost" data-zoom="in">+</button>
-            <button class="ghost" data-zoom="reset">fit</button>
-          </div>
-          <button id="lettermode" class="ghost" title="work through the alphabet letter by letter, correcting each letter's pen path once for every word that uses it">Letter Studio</button>
-          <div id="shapinginfo" class="meta right"></div>
-        </div>
-        <div id="letterpanel" hidden>
-          <div id="letterstrip" class="letterstrip"></div>
-          <div class="handtools">
-            <div id="letterinfo" class="meta"></div>
-            <button id="handsave" class="ghost" title="save every hand-edited letter of this font to a file">⤓ save hand</button>
-            <label class="ghost filebtn" title="load hand-edited letters from a file saved here earlier"
-              >⤒ load hand<input type="file" id="handfile" accept="application/json,.json" hidden
-            /></label>
+      <section class="panel workbench">
+        <div class="tabs" role="tablist">
+          <button id="tabPaths" class="tab on" role="tab" title="the recovered pen paths of the text, and the editor">Pen paths</button>
+          <button id="lettermode" class="tab" role="tab" title="work through the alphabet letter by letter, correcting each letter's pen path once for every word that uses it">Letter Studio</button>
+          <button id="tabAdvanced" class="tab" role="tab" title="settings and diagnostics">Advanced</button>
+          <div class="tabspace"></div>
+          <div id="viewtools" class="viewtools">
+            <label class="check"><input type="checkbox" id="outlines" checked /> outlines</label>
+            <label class="check"><input type="checkbox" id="arrows" checked /> arrows</label>
+            <label class="check"><input type="checkbox" id="numbers" checked /> numbers</label>
+            <label class="check"><input type="checkbox" id="nodes" checked /> endpoints</label>
+            <div class="zoomctl" title="scroll to zoom at the cursor · drag empty space to pan">
+              <button class="ghost" data-zoom="out">−</button>
+              <span class="meta zoomval">100%</span>
+              <button class="ghost" data-zoom="in">+</button>
+              <button class="ghost" data-zoom="reset">fit</button>
+            </div>
           </div>
         </div>
-        <div class="stage"><canvas id="debug"></canvas></div>
-        <div id="strokelist" class="strokelist"></div>
-        <div class="editor">
-          <div id="drawtools">
-            <button id="drawMode" class="ghost" title="draw a new pen path over the letter; it becomes a stroke of that glyph">✎ draw stroke</button>
-            <button id="curveMode" class="ghost" title="edit the selected stroke by Bézier anchors and handles instead of its points">⌒ curve handles</button>
-            <label class="check" title="pull hand-placed points onto the ink's centreline"
-              ><input type="checkbox" id="snapInk" checked /> snap to ink</label
-            >
-            <span id="edithint" class="meta"
-              >Click a stroke to edit it, then click one of its points to pick it. Drag a point to
-              reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point; [ and ] make its width thinner or wider (⇧ by a fifth), \ gives it the ink's width back.
-              With ⌒ curve handles on, the stroke shows Bézier anchors (squares) and handles (knobs): drag an anchor and its handles come along, drag a handle and its partner stays in line (hold ⌥ to break it).
-              ⌘Z / ⌘⇧Z undo and redo.</span
-            >
-          </div>
-          <div id="editcontrols" hidden>
-            <span id="editlabel" class="meta"></span>
-            <button id="undoEdit" class="ghost" title="nothing to undo" disabled>↶ undo</button>
-            <button id="redoEdit" class="ghost" title="nothing to redo" disabled>↷ redo</button>
-            <button id="deletePoint" class="ghost" title="click a point on the stroke first" disabled>⌫ delete point</button>
-            <button id="moveEarlier" class="ghost">◀ earlier</button>
-            <button id="moveLater" class="ghost">later ▶</button>
-            <button id="reverseStroke" class="ghost">⇄ reverse direction</button>
-            <button id="splitStroke" class="ghost" title="click a point on the stroke in the view above to place the split">✂ split here</button>
-            <button id="deleteStroke" class="ghost" title="removes the pen pass; the ink is revealed by the nearest remaining stroke">🗑 delete stroke</button>
-            <button id="resetGlyph" class="ghost">↺ re-run this glyph</button>
-            <button id="deselect" class="ghost">✕ deselect</button>
-          </div>
-        </div>
-        <div id="internalsview" class="internals" hidden></div>
-      </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Heuristic uncertainty log</h2>
-          <div id="logcount" class="meta right"></div>
-        </div>
-        <div id="log" class="log"></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Stroke data (JSON)</h2>
-          <div class="right">
-            <button id="copyjson" class="ghost">Copy</button>
-            <button id="downloadjson" class="ghost">Download</button>
+        <div id="paths" class="tabpane">
+          <div id="letterpanel" hidden>
+            <div id="letterstrip" class="letterstrip"></div>
+            <div class="handtools">
+              <div id="letterinfo" class="meta"></div>
+              <button id="handsave" class="ghost" title="save every hand-edited letter of this font to a file">⤓ save hand</button>
+              <label class="ghost filebtn" title="load hand-edited letters from a file saved here earlier"
+                >⤒ load hand<input type="file" id="handfile" accept="application/json,.json" hidden
+              /></label>
+            </div>
+          </div>
+          <div class="stage"><canvas id="debug"></canvas></div>
+          <div id="strokelist" class="strokelist"></div>
+          <div class="editor">
+            <div id="drawtools">
+              <button id="drawMode" class="ghost" title="draw a new pen path over the letter; it becomes a stroke of that glyph">✎ draw stroke</button>
+              <button id="curveMode" class="ghost" title="edit the selected stroke by Bézier anchors and handles instead of its points">⌒ curve handles</button>
+              <label class="check" title="pull hand-placed points onto the ink's centreline"
+                ><input type="checkbox" id="snapInk" checked /> snap to ink</label
+              >
+              <span id="edithint" class="meta hint"
+                title="Click a stroke to edit it, then click one of its points to pick it. Drag a point to reshape the curve (hold shift to move that point alone); ⌫ deletes the picked point; [ and ] make its width thinner or wider (⇧ by a fifth), \ gives it the ink's width back. With ⌒ curve handles on, the stroke shows Bézier anchors (squares) and handles (knobs): drag an anchor and its handles come along, drag a handle and its partner stays in line (hold ⌥ to break it). ⌘Z / ⌘⇧Z undo and redo."
+                >click a stroke, then a point · drag to reshape (⇧ one point) · ⌫ delete · [ ] width · \ reset · ⌘Z undo · hover for more</span
+              >
+            </div>
+            <div id="editcontrols" hidden>
+              <span id="editlabel" class="meta"></span>
+              <button id="undoEdit" class="ghost" title="nothing to undo" disabled>↶ undo</button>
+              <button id="redoEdit" class="ghost" title="nothing to redo" disabled>↷ redo</button>
+              <button id="deletePoint" class="ghost" title="click a point on the stroke first" disabled>⌫ delete point</button>
+              <button id="moveEarlier" class="ghost">◀ earlier</button>
+              <button id="moveLater" class="ghost">later ▶</button>
+              <button id="reverseStroke" class="ghost">⇄ reverse direction</button>
+              <button id="splitStroke" class="ghost" title="click a point on the stroke in the view above to place the split">✂ split here</button>
+              <button id="deleteStroke" class="ghost" title="removes the pen pass; the ink is revealed by the nearest remaining stroke">🗑 delete stroke</button>
+              <button id="resetGlyph" class="ghost">↺ re-run this glyph</button>
+              <button id="deselect" class="ghost">✕ deselect</button>
+            </div>
           </div>
         </div>
-        <pre id="json" class="json"></pre>
+
+        <div id="advanced" class="tabpane" hidden>
+          <p class="sub">
+            A font's own outline, written by a pen: the text is shaped, each glyph rasterised and thinned, the pen's
+            order and direction read off the skeleton, and the letter drawn as the pen's ribbon along that path.
+          </p>
+          <div class="row wrap small">
+            <label class="field">
+              <span>Raster em (px)</span>
+              <input id="rasterEm" type="number" min="128" max="1024" step="64" value="512" />
+            </label>
+            <label class="field" title="stroke: the pen's ribbon itself is the letter, its profiles fitted to the outline; outline: the font's outline uncovered along the recovered pen path (the previous engine)">
+              <span>Renderer</span>
+              <select id="renderer">
+                <option value="stroke">stroke</option>
+                <option value="outline">outline reveal (previous engine)</option>
+              </select>
+            </label>
+            <label class="check tall"><input type="checkbox" id="internals" /> raster + skeleton figures</label>
+            <button id="clearcache" class="ghost tall">Clear stroke cache</button>
+          </div>
+          <div id="fontinfo" class="meta block">Loading font…</div>
+          <div id="shapinginfo" class="meta block"></div>
+          <div id="internalsview" class="internals" hidden></div>
+
+          <div class="sub-head">
+            <h2>Heuristic uncertainty log</h2>
+            <div id="logcount" class="meta right"></div>
+          </div>
+          <div id="log" class="log"></div>
+
+          <div class="sub-head">
+            <h2>Stroke data (JSON)</h2>
+            <div class="right">
+              <button id="copyjson" class="ghost">Copy</button>
+              <button id="downloadjson" class="ghost">Download</button>
+            </div>
+          </div>
+          <pre id="json" class="json"></pre>
+        </div>
       </section>
     </main>
 
