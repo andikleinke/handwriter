@@ -13,57 +13,60 @@
     </header>
 
     <main>
-      <section class="panel controls">
-        <div class="row">
-          <label class="field grow">
+      <section class="panel studio-top">
+        <aside class="side">
+          <label class="field">
             <span>Text</span>
-            <textarea id="text" rows="1" autocomplete="off" spellcheck="false" title="Enter analyses; Shift+Enter starts a new line">hello</textarea>
+            <textarea id="text" rows="2" autocomplete="off" spellcheck="false" title="Enter analyses; Shift+Enter starts a new line">hello</textarea>
           </label>
           <label class="field">
             <span>Font</span>
             <select id="fontpick" title="the bundled font, or any font you have added"></select>
           </label>
-          <label class="ghostbtn" title="add a font file; it is kept in this browser for next time">
-            + Add font… <input id="fontfile" type="file" accept=".otf,.ttf,.woff" hidden />
-          </label>
-          <button id="fontremove" class="ghost" title="forget the selected font" hidden>Remove</button>
-          <label class="check tall" title="let the pen flow from one letter's exit straight into the next letter's entry"
+          <div class="row wrap small">
+            <label class="ghostbtn" title="add a font file; it is kept in this browser for next time">
+              + Add font… <input id="fontfile" type="file" accept=".otf,.ttf,.woff" hidden />
+            </label>
+            <button id="fontremove" class="ghost" title="forget the selected font" hidden>Remove</button>
+          </div>
+          <label class="check" title="let the pen flow from one letter's exit straight into the next letter's entry"
             ><input type="checkbox" id="connect" checked /> connect letters</label
           >
-          <button id="analyze" class="primary">Analyze</button>
-        </div>
-      </section>
+          <button id="analyze" class="primary wide">Analyze</button>
 
-      <section class="panel">
-        <div class="stage paper player">
-          <canvas id="anim"></canvas>
-          <div class="player-controls">
-            <button id="playpause" class="ctl" title="play"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.2v11.6L13.5 8z"/></svg></button>
-            <button id="record" class="ctl" title="records one run of the preview; the take downloads when it ends"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/></svg><span>Record</span></button>
-            <input id="scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="position" />
-            <span id="timecode" class="tc">0.0 / 0.0 s</span>
-          </div>
-        </div>
-        <div class="row wrap playback small">
-          <label class="field grow">
+          <div class="side-sep"></div>
+
+          <label class="field">
             <span>Avg speed <b id="speedval">2.2</b> em/s</span>
             <input id="speed" type="range" min="0.3" max="4" step="0.1" value="2.2" />
           </label>
-          <label class="check"><input type="checkbox" id="showpen" checked /> pen tip</label>
-          <label class="check" title="curvature-dependent speed with ease in/out, instead of constant speed"
-            ><input type="checkbox" id="natural" checked /> natural speed</label
-          >
-          <label class="check"><input type="checkbox" id="loop" checked /> loop</label>
-          <span class="moviectl">
+          <div class="row wrap small">
+            <label class="check"><input type="checkbox" id="showpen" checked /> pen tip</label>
+            <label class="check" title="curvature-dependent speed with ease in/out, instead of constant speed"
+              ><input type="checkbox" id="natural" checked /> natural speed</label
+            >
+            <label class="check"><input type="checkbox" id="loop" checked /> loop</label>
+          </div>
+          <div class="row wrap small moviectl">
             <select id="movieformat" title="the movie keeps a transparent background in either format">
               <option value="prores4444">ProRes 4444</option>
               <option value="hevc-alpha">HEVC + alpha</option>
             </select>
             <button id="exportmovie" class="ghost"
               title="renders the animation frame by frame (60 fps, 1920 px wide, transparent background) and saves a .mov with an alpha channel; the pen tip follows its checkbox">Export movie</button>
-          </span>
+          </div>
           <a id="takelink" class="takelink" hidden></a>
           <span id="takeinfo" class="meta"></span>
+        </aside>
+
+        <div class="stage paper player">
+          <canvas id="anim"></canvas>
+          <div class="player-controls">
+            <button id="playpause" class="ctl" title="play"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.2v11.6L13.5 8z"/></svg></button>
+            <button id="record" class="ctl" title="records one run of the preview; the take downloads when it ends" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/></svg><span>Record</span></button>
+            <input id="scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="position" />
+            <span id="timecode" class="tc">0.0 / 0.0 s</span>
+          </div>
         </div>
       </section>
 
@@ -147,7 +150,9 @@
             </label>
             <label class="check tall"><input type="checkbox" id="internals" /> raster + skeleton figures</label>
             <button id="clearcache" class="ghost tall">Clear stroke cache</button>
+            <button id="probecodec" class="ghost tall" title="asks this browser's WebCodecs whether it can encode HEVC and VP9 with an alpha channel">Check in-browser video encoding</button>
           </div>
+          <div id="probeinfo" class="meta block" hidden></div>
           <div id="fontinfo" class="meta block">Loading font…</div>
           <div id="shapinginfo" class="meta block"></div>
           <div id="internalsview" class="internals" hidden></div>

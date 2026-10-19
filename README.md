@@ -197,11 +197,15 @@ Open http://localhost:5173.
    raster + skeleton figures.
 7. There too, **Copy** / **Download** the JSON to see the cacheable data layer.
 
-The page (v0.37.0) is three cards: the text and font, the animation
-preview, and a workbench with three tabs — **Pen paths** (the recovered
+The page (v0.38.0) is two cards: the preview with a side panel to its
+left (text, font, connect letters, Analyze; speed, pen tip, natural speed,
+loop, Export movie), and a workbench with three tabs — **Pen paths** (the recovered
 paths and the editor), **Letter Studio** (the same view with the alphabet
 strip above it) and **Advanced** (everything a first look does not need:
-settings, diagnostics, the log and the stroke data).
+settings, diagnostics, the log and the stroke data). **Check in-browser
+video encoding** under Advanced asks the browser's WebCodecs whether it
+could encode HEVC or VP9 with an alpha channel itself; the movie export
+still runs through the dev server's AVFoundation encoder on a Mac.
 
 ## Pipeline
 

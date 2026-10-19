@@ -1,9 +1,15 @@
 [
   {
+    "version": "0.38.0",
+    "tag": "v0.38.0",
+    "date": "2026-10-19",
+    "note": "v0.38.0 — the controls in a side panel beside the preview; Record dropped; a probe for in-browser alpha video encoding"
+  },
+  {
     "version": "0.37.0",
     "tag": "v0.37.0",
     "date": "2026-10-19",
-    "note": "v0.37.0 — a compact page: three cards and a tabbed workbench, with settings and diagnostics under Advanced"
+    "note": "compact page with a tabbed workbench"
   },
   {
     "version": "0.36.0",

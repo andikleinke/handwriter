@@ -1558,3 +1558,30 @@ versionList.addEventListener('click', (e) => {
   setTimeout(() => { code.textContent = was; }, 900);
 });
 
+
+
+/* ------------------------------------- can this browser encode with alpha? -- */
+
+// The movie export runs through the dev server's AVFoundation encoder on a
+// Mac; this asks WebCodecs whether the browser itself could do it, which
+// is what a hosted page would need.
+document.getElementById('probecodec')?.addEventListener('click', async () => {
+  const out = document.getElementById('probeinfo');
+  out.hidden = false;
+  if (!('VideoEncoder' in window)) { out.textContent = 'WebCodecs is not available in this browser.'; return; }
+  const tries = [
+    ['HEVC (hvc1) with alpha', { codec: 'hvc1.1.6.L120.B0', alpha: 'keep' }],
+    ['HEVC (hvc1) without alpha', { codec: 'hvc1.1.6.L120.B0' }],
+    ['VP9 with alpha', { codec: 'vp09.00.10.08', alpha: 'keep' }],
+    ['H.264 without alpha', { codec: 'avc1.42001f' }],
+  ];
+  const lines = [];
+  for (const [label, cfg] of tries) {
+    try {
+      const r = await VideoEncoder.isConfigSupported({ width: 1920, height: 1080, bitrate: 20_000_000, framerate: 60, ...cfg });
+      const alphaKept = r.config?.alpha === 'keep';
+      lines.push(`${label}: ${r.supported ? 'yes' : 'no'}${cfg.alpha ? (alphaKept ? ' (alpha kept)' : ' (alpha would be dropped)') : ''}`);
+    } catch (e) { lines.push(`${label}: error (${e.message || e})`); }
+  }
+  out.textContent = `${navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') ? 'Safari' : 'this browser'}: ` + lines.join(' · ');
+});
